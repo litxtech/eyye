@@ -48,7 +48,9 @@ export default function NotificationsScreen() {
       void load();
     }
     const convId = n.data?.conversation_id;
-    if (convId) router.push({ pathname: '/chat/[id]', params: { id: convId, name: n.title, type: 'direct' } });
+    if (convId) router.push({ pathname: '/chat/[id]', params: { id: convId, name: n.title, type: n.type === 'group_message' ? 'group' : 'direct' } });
+    else if (n.type === 'game_invite' && n.data?.table_id) router.push({ pathname: '/okey/[id]', params: { id: n.data.table_id, role: 'player' } });
+    else if (n.type === 'match' && n.data?.room_id) router.push({ pathname: '/truth-dare/[id]', params: { id: n.data.room_id, role: 'player' } });
     else if (n.actor_id) router.push({ pathname: '/user/[id]', params: { id: n.actor_id } });
   }
 

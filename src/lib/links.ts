@@ -3,28 +3,28 @@ import { router } from 'expo-router';
 // Maps push-notification payloads and eyye:// deep links to app routes.
 export function routeForNotification(data: any) {
   const type = data?.type as string | undefined;
-  const id = data?.conversation_id ?? data?.chat_id ?? data?.id;
+  const convId = data?.conversation_id ?? data?.chat_id;
+  const userId = data?.user_id ?? data?.actor_id;
   switch (type) {
-    case 'chat':
     case 'message':
-      if (id) return { pathname: '/chat/[id]', params: { id, name: data?.name ?? '', type: 'direct' } };
+    case 'group_message':
+      if (convId) return { pathname: '/chat/[id]', params: { id: convId, name: data?.title ?? '', type: type === 'group_message' ? 'group' : 'direct' } };
       return '/chats';
     case 'follow':
-    case 'profile':
-      if (data?.user_id) return { pathname: '/user/[id]', params: { id: data.user_id } };
+      if (userId) return { pathname: '/user/[id]', params: { id: userId } };
       return '/profile';
-    case 'okey_invite':
-    case 'okey':
+    case 'game_invite':
       if (data?.table_id) return { pathname: '/okey/[id]', params: { id: data.table_id, room: data?.room ?? '', role: 'player' } };
       return '/okey';
-    case 'td_invite':
-    case 'truth_dare':
+    case 'match':
       if (data?.room_id) return { pathname: '/truth-dare/[id]', params: { id: data.room_id, role: 'player' } };
       return '/truth-dare';
     case 'notification':
       return '/notifications';
     default:
-      if (id && data?.kind === 'okey') return { pathname: '/okey/[id]', params: { id } };
+      if (data?.table_id) return { pathname: '/okey/[id]', params: { id: data.table_id, role: 'player' } };
+      if (data?.room_id) return { pathname: '/truth-dare/[id]', params: { id: data.room_id, role: 'player' } };
+      if (convId) return { pathname: '/chat/[id]', params: { id: convId, type: 'direct' } };
       return null;
   }
 }
