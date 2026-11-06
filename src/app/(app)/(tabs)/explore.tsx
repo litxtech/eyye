@@ -3,10 +3,10 @@ import { View, Text, TextInput, FlatList, TouchableOpacity } from 'react-native'
 import { useTranslation } from 'react-i18next';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { Screen, Avatar } from '../../components/ui';
-import { useTheme } from '../../theme/ThemeContext';
-import { useAppStore } from '../../stores/appStore';
-import { supabase } from '../../lib/supabase';
+import { Screen, Avatar, Header } from '../../../components/ui';
+import { useTheme } from '../../../theme/ThemeContext';
+import { useAppStore } from '../../../stores/appStore';
+import { supabase } from '../../../lib/supabase';
 
 interface UserHit { id: string; username: string; display_name: string; avatar_url: string | null; }
 
@@ -32,8 +32,8 @@ export default function ExploreScreen() {
 
   return (
     <Screen>
-      <View style={{ paddingHorizontal: theme.spacing(4), paddingTop: theme.spacing(8), paddingBottom: theme.spacing(3) }}>
-        <Text style={{ color: theme.colors.text, fontSize: theme.typography.sizes.xxl, fontWeight: '800', marginBottom: theme.spacing(4) }}>{t('tabs.explore')}</Text>
+      <Header title={t('tabs.explore')} />
+      <View style={{ paddingHorizontal: theme.spacing(4), paddingBottom: theme.spacing(3) }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: theme.colors.inputBackground, borderRadius: theme.radii.md, paddingHorizontal: theme.spacing(3) }}>
           <Ionicons name="search" size={18} color={theme.colors.textMuted} />
           <TextInput

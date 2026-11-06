@@ -3,10 +3,10 @@ import { View, Text, FlatList, TouchableOpacity, RefreshControl } from 'react-na
 import { useTranslation } from 'react-i18next';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { Screen, Avatar, Header } from '../../components/ui';
-import { useTheme } from '../../theme/ThemeContext';
-import { useAppStore } from '../../stores/appStore';
-import { supabase } from '../../lib/supabase';
+import { Screen, Avatar, Header } from '../../../components/ui';
+import { useTheme } from '../../../theme/ThemeContext';
+import { useAppStore } from '../../../stores/appStore';
+import { supabase } from '../../../lib/supabase';
 
 interface ChatItem {
   id: string;

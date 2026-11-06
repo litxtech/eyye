@@ -32,7 +32,7 @@ export default function LoginScreen() {
     setLoading(false);
     if (err) { setError(err.message); return; }
     if (data.user) void saveAccount(data.user.id, acc.email, pw);
-    router.replace('/(app)/chats');
+    router.replace('/chats');
   }
 
   async function handleLogin() {
@@ -46,7 +46,7 @@ export default function LoginScreen() {
       return;
     }
     if (data.user) void saveAccount(data.user.id, email, password).then(refreshAccounts);
-    router.replace('/(app)/chats');
+    router.replace('/chats');
   }
 
   async function social(fn: () => Promise<any>) {

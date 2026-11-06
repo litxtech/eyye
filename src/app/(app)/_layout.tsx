@@ -1,16 +1,14 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, TouchableOpacity, AppState } from 'react-native';
-import { Redirect, Tabs } from 'expo-router';
+import { Redirect, Stack } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { biometricAuthenticate } from '../../lib/biometric';
-import { useTranslation } from 'react-i18next';
 import { useAppStore } from '../../stores/appStore';
 import { useTheme } from '../../theme/ThemeContext';
 import { supabase } from '../../lib/supabase';
 import { registerForPushNotifications } from '../../lib/push';
 
 export default function AppLayout() {
-  const { t } = useTranslation();
   const theme = useTheme();
   const session = useAppStore((s) => s.session);
   const loaded = useAppStore((s) => s.sessionLoaded);
@@ -58,6 +56,16 @@ export default function AppLayout() {
 
   return (
     <>
+    {/* tabs live in (tabs); every other screen (okey, chat, truth-dare, ...) is pushed on this stack */}
+    <Stack
+      screenOptions={{
+        headerShown: false,
+        contentStyle: { backgroundColor: theme.colors.background },
+        animation: 'slide_from_right',
+      }}
+    >
+      <Stack.Screen name="(tabs)" />
+    </Stack>
     {locked && biometricLock && (
       <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: theme.colors.background, alignItems: 'center', justifyContent: 'center', zIndex: 999 }}>
         <Ionicons name="lock-closed" size={56} color={theme.colors.accent} />
@@ -67,35 +75,6 @@ export default function AppLayout() {
         </TouchableOpacity>
       </View>
     )}
-    <Tabs
-      screenOptions={{
-        headerShown: false,
-        tabBarStyle: {
-          backgroundColor: theme.colors.surface,
-          borderTopColor: theme.colors.border,
-          height: 60,
-          paddingBottom: 8,
-        },
-        tabBarActiveTintColor: theme.colors.accent,
-        tabBarInactiveTintColor: theme.colors.textMuted,
-      }}
-    >
-      <Tabs.Screen
-        name="chats" options={{ title: t('tabs.chats'), tabBarIcon: ({ color, size }) => <Ionicons name="chatbubbles" size={size} color={(color ?? theme.colors.text) as string} /> }}
-      />
-      <Tabs.Screen
-        name="explore" options={{ title: t('tabs.explore'), tabBarIcon: ({ color, size }) => <Ionicons name="compass" size={size} color={(color ?? theme.colors.text) as string} /> }}
-      />
-      <Tabs.Screen
-        name="games" options={{ title: t('tabs.games'), tabBarIcon: ({ color, size }) => <Ionicons name="game-controller" size={size} color={(color ?? theme.colors.text) as string} /> }}
-      />
-      <Tabs.Screen
-        name="profile" options={{ title: t('tabs.profile'), tabBarIcon: ({ color, size }) => <Ionicons name="person" size={size} color={(color ?? theme.colors.text) as string} /> }}
-      />
-      <Tabs.Screen
-        name="settings" options={{ title: t('tabs.settings'), tabBarIcon: ({ color, size }) => <Ionicons name="settings" size={size} color={(color ?? theme.colors.text) as string} /> }}
-      />
-    </Tabs>
     </>
   );
 }

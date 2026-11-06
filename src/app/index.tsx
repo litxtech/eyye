@@ -22,7 +22,7 @@ export default function Index() {
   }, []);
 
   if (!(loaded && minDone)) return <LaunchAnimation accent={theme.colors.accent} />;
-  return <Redirect href={session ? '/(app)/chats' : '/(auth)/login'} />;
+  return <Redirect href={session ? '/chats' : '/(auth)/login'} />;
 }
 
 function LaunchAnimation({ accent }: { accent: string }) {

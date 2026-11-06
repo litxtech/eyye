@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { View, Text, FlatList, TouchableOpacity, TextInput, Alert, Keyboard, Modal, Pressable, Image, ActivityIndicator } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import { useLocalSearchParams, router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -398,24 +399,26 @@ export default function ChatScreen() {
   return (
     <Screen>
       {/* Header */}
-      <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: theme.spacing(3), paddingTop: theme.spacing(5), paddingBottom: theme.spacing(2), borderBottomWidth: 1, borderBottomColor: theme.colors.border }}>
-        <TouchableOpacity onPress={() => router.back()} style={{ padding: theme.spacing(2) }}>
-          <Ionicons name="arrow-back" size={24} color={theme.colors.text} />
-        </TouchableOpacity>
-        <Avatar uri={params.avatar} name={params.name} size={38} />
-        <View style={{ flex: 1, marginLeft: theme.spacing(2) }}>
-          <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: theme.typography.sizes.md }} numberOfLines={1}>{params.name}</Text>
-          <Text style={{ color: peerTyping ? theme.colors.accent : peerOnline ? theme.colors.online : theme.colors.textMuted, fontSize: theme.typography.sizes.xs }}>
-            {peerTyping ? t('common.typing') : peerOnline ? t('common.online') : params.type === 'group' ? t('chat.group') : ''}
-          </Text>
+      <SafeAreaView edges={['top']} style={{ backgroundColor: theme.colors.background }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: theme.spacing(3), paddingBottom: theme.spacing(2), borderBottomWidth: 1, borderBottomColor: theme.colors.border }}>
+          <TouchableOpacity onPress={() => router.back()} style={{ padding: theme.spacing(2) }}>
+            <Ionicons name="arrow-back" size={24} color={theme.colors.text} />
+          </TouchableOpacity>
+          <Avatar uri={params.avatar} name={params.name} size={38} />
+          <View style={{ flex: 1, marginLeft: theme.spacing(2) }}>
+            <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: theme.typography.sizes.md }} numberOfLines={1}>{params.name}</Text>
+            <Text style={{ color: peerTyping ? theme.colors.accent : peerOnline ? theme.colors.online : theme.colors.textMuted, fontSize: theme.typography.sizes.xs }}>
+              {peerTyping ? t('common.typing') : peerOnline ? t('common.online') : params.type === 'group' ? t('chat.group') : ''}
+            </Text>
+          </View>
+          <TouchableOpacity onPress={() => router.push({ pathname: '/user/[id]', params: { id: params.otherId } })} style={{ padding: theme.spacing(2) }}>
+            <Ionicons name="person-circle-outline" size={26} color={theme.colors.text} />
+          </TouchableOpacity>
+          <TouchableOpacity style={{ padding: theme.spacing(2) }}>
+            <Ionicons name="call-outline" size={22} color={theme.colors.text} />
+          </TouchableOpacity>
         </View>
-        <TouchableOpacity onPress={() => router.push({ pathname: '/user/[id]', params: { id: params.otherId } })} style={{ padding: theme.spacing(2) }}>
-          <Ionicons name="person-circle-outline" size={26} color={theme.colors.text} />
-        </TouchableOpacity>
-        <TouchableOpacity style={{ padding: theme.spacing(2) }}>
-          <Ionicons name="call-outline" size={22} color={theme.colors.text} />
-        </TouchableOpacity>
-      </View>
+      </SafeAreaView>
 
       {/* Messages */}
       <FlatList

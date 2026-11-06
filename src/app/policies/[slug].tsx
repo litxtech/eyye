@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, TextInput } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Screen } from '../../components/ui';
@@ -36,13 +37,15 @@ export default function PolicyScreen() {
 
   return (
     <Screen>
-      <View style={{ flexDirection: 'row', alignItems: 'center', padding: theme.spacing(4), borderBottomWidth: 1, borderBottomColor: theme.colors.border }}>
-        <TouchableOpacity onPress={() => router.back()} style={{ padding: theme.spacing(2) }}>
-          <Ionicons name={rtl ? 'arrow-forward' : 'arrow-back'} size={24} color={theme.colors.text} />
-        </TouchableOpacity>
-        <Text style={{ flex: 1, color: theme.colors.text, fontSize: theme.typography.sizes.lg, fontWeight: '700', textAlign: 'center' }}>{POLICY_TITLES[slug ?? ''] ?? slug}</Text>
-        <View style={{ width: 40 }} />
-      </View>
+      <SafeAreaView edges={['top']} style={{ backgroundColor: theme.colors.background }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', padding: theme.spacing(4), borderBottomWidth: 1, borderBottomColor: theme.colors.border }}>
+          <TouchableOpacity onPress={() => router.back()} style={{ padding: theme.spacing(2) }}>
+            <Ionicons name={rtl ? 'arrow-forward' : 'arrow-back'} size={24} color={theme.colors.text} />
+          </TouchableOpacity>
+          <Text style={{ flex: 1, color: theme.colors.text, fontSize: theme.typography.sizes.lg, fontWeight: '700', textAlign: 'center' }}>{POLICY_TITLES[slug ?? ''] ?? slug}</Text>
+          <View style={{ width: 40 }} />
+        </View>
+      </SafeAreaView>
       <View style={{ padding: theme.spacing(4) }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: theme.colors.inputBackground, borderRadius: theme.radii.md, paddingHorizontal: theme.spacing(3), marginBottom: theme.spacing(4) }}>
           <Ionicons name="search" size={16} color={theme.colors.textMuted} />

@@ -48,7 +48,7 @@ export default function VerifyScreen() {
       await supabase.from('user_privacy_settings').upsert({ user_id: user.id }, { onConflict: 'user_id', ignoreDuplicates: true });
       await supabase.from('user_notification_preferences').upsert({ user_id: user.id }, { onConflict: 'user_id', ignoreDuplicates: true });
     }
-    router.replace('/(app)/chats');
+    router.replace('/chats');
   }
 
   async function resend() {

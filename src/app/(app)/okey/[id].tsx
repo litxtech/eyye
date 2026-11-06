@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { View, Text, FlatList, TouchableOpacity, TextInput, Modal, Pressable, ScrollView, Alert, Animated } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import { useLocalSearchParams, router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -220,26 +221,28 @@ export default function OkeyTable() {
   return (
     <Screen>
       {/* top bar */}
-      <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: theme.spacing(3), paddingTop: theme.spacing(5), paddingBottom: theme.spacing(2) }}>
-        <TouchableOpacity onPress={() => router.back()} style={{ padding: theme.spacing(2) }}>
-          <Ionicons name="close" size={26} color={theme.colors.text} />
-        </TouchableOpacity>
-        <Text style={{ flex: 1, color: theme.colors.text, fontWeight: '800', fontSize: theme.typography.sizes.md, textAlign: 'center' }} numberOfLines={1}>
-          {data.table.name} {data.table.mode === 'pairs' ? '· Eşli' : '· Tekli'}
-        </Text>
-        {status === 'waiting' ? (
-          <TouchableOpacity onPress={invite} style={{ padding: theme.spacing(2) }}>
-            <Ionicons name="person-add" size={24} color={theme.colors.accent} />
+      <SafeAreaView edges={['top']} style={{ backgroundColor: theme.colors.background }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: theme.spacing(3), paddingBottom: theme.spacing(2) }}>
+          <TouchableOpacity onPress={() => router.back()} style={{ padding: theme.spacing(2) }}>
+            <Ionicons name="close" size={26} color={theme.colors.text} />
           </TouchableOpacity>
-        ) : (
-          <TouchableOpacity onPress={() => { setMicOn(!micOn); void setMic(!micOn); }} style={{ padding: theme.spacing(2) }}>
-            <Ionicons name={micOn ? 'mic' : 'mic-off'} size={22} color={micOn ? theme.colors.online : theme.colors.danger} />
+          <Text style={{ flex: 1, color: theme.colors.text, fontWeight: '800', fontSize: theme.typography.sizes.md, textAlign: 'center' }} numberOfLines={1}>
+            {data.table.name} {data.table.mode === 'pairs' ? '· Eşli' : '· Tekli'}
+          </Text>
+          {status === 'waiting' ? (
+            <TouchableOpacity onPress={invite} style={{ padding: theme.spacing(2) }}>
+              <Ionicons name="person-add" size={24} color={theme.colors.accent} />
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity onPress={() => { setMicOn(!micOn); void setMic(!micOn); }} style={{ padding: theme.spacing(2) }}>
+              <Ionicons name={micOn ? 'mic' : 'mic-off'} size={22} color={micOn ? theme.colors.online : theme.colors.danger} />
+            </TouchableOpacity>
+          )}
+          <TouchableOpacity onPress={leave} style={{ padding: theme.spacing(2) }}>
+            <Ionicons name="exit-outline" size={24} color={theme.colors.danger} />
           </TouchableOpacity>
-        )}
-        <TouchableOpacity onPress={leave} style={{ padding: theme.spacing(2) }}>
-          <Ionicons name="exit-outline" size={24} color={theme.colors.danger} />
-        </TouchableOpacity>
-      </View>
+        </View>
+      </SafeAreaView>
 
       {/* game area */}
       <View style={{ flex: 1, backgroundColor: '#1A120B' }}>

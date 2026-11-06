@@ -3,10 +3,10 @@ import { View, Text, ScrollView, TouchableOpacity, FlatList, RefreshControl } fr
 import { useTranslation } from 'react-i18next';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { Screen, Avatar, Button, Header } from '../../components/ui';
-import { useTheme } from '../../theme/ThemeContext';
-import { useAppStore } from '../../stores/appStore';
-import { supabase } from '../../lib/supabase';
+import { Screen, Avatar, Button, Header } from '../../../components/ui';
+import { useTheme } from '../../../theme/ThemeContext';
+import { useAppStore } from '../../../stores/appStore';
+import { supabase } from '../../../lib/supabase';
 
 interface Profile {
   id: string; username: string; display_name: string; bio: string;

@@ -1,11 +1,11 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { router } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { Screen } from '../../components/ui';
-import { useTheme } from '../../theme/ThemeContext';
+import { Screen } from '../../../components/ui';
+import { useTheme } from '../../../theme/ThemeContext';
 
 const GAMES = [
   {
@@ -26,31 +26,26 @@ const GAMES = [
     route: '/truth-dare',
     color: '#E85D75',
   },
-];
+] as const;
 
 export default function GamesScreen() {
   const { t } = useTranslation();
   const theme = useTheme();
   return (
     <Screen>
-      <ScrollView contentContainerStyle={{ padding: theme.spacing(4), paddingTop: theme.spacing(8) }}>
+      <ScrollView contentContainerStyle={{ padding: theme.spacing(4), paddingTop: theme.spacing(8), paddingBottom: 96 }}>
         <Text style={{ color: theme.colors.text, fontSize: theme.typography.sizes.xxl, fontWeight: '800', marginBottom: theme.spacing(4) }}>
           {t('tabs.games')}
         </Text>
         {GAMES.map((g) => (
-          <TouchableOpacity
-            key={g.id}
-            onPress={() => router.push({ pathname: g.route })}
-            style={styles.card}
-            activeOpacity={0.85}
-          >
+          <TouchableOpacity key={g.id} onPress={() => router.push(g.route)} activeOpacity={0.85} style={styles.card}>
             <LinearGradient
               colors={[g.color + '22', 'transparent']}
               start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
               style={styles.cardGradient}
             />
             <View style={styles.iconWrap}>
-              <Ionicons name={g.icon as any} size={28} color={g.color} />
+              <Ionicons name={g.icon} size={28} color={g.color} />
             </View>
             <View style={{ flex: 1, marginLeft: theme.spacing(4) }}>
               <Text style={{ color: theme.colors.text, fontSize: theme.typography.sizes.lg, fontWeight: '700' }}>{g.title}</Text>
