@@ -73,7 +73,6 @@
       "expo-localization",
       "expo-image",
       "expo-web-browser",
-      "expo-av",
       "expo-font",
       "expo-sqlite",
       "expo-camera",
