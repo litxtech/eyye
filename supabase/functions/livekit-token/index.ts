@@ -53,27 +53,19 @@ Deno.serve(async (req) => {
   let displayName = user.email ?? user.id;
 
   if (context === 'okey') {
+    // okey_tables RLS only returns tables the caller sits at or watches
+    const { data: tbl } = await supabase.from('okey_tables').select('id').eq('livekit_room', room).maybeSingle();
+    if (!tbl) return json({ error: 'forbidden' }, 403);
     const { data: seat } = await supabase
       .from('okey_players')
-      .select('id, seat, is_bot, tables!inner(id, status)')
+      .select('seat, is_bot')
+      .eq('table_id', tbl.id)
       .eq('user_id', user.id)
-      .eq('tables.room_name', room)
       .is('left_at', null)
       .maybeSingle();
-    const isPlayer = !!seat;
-    canPublish = isPlayer && !seat.is_bot;
+    canPublish = !!seat && !seat.is_bot;
     const { data: profile } = await supabase.from('profiles').select('username, display_name').eq('id', user.id).single();
     displayName = profile?.display_name ?? profile?.username ?? displayName;
-    if (!isPlayer) {
-      // viewers subscribe only
-      const { data: viewer } = await supabase
-        .from('okey_viewers')
-        .select('id')
-        .eq('table_id', (seat as any)?.tables?.id ?? '')
-        .eq('user_id', user.id)
-        .maybeSingle();
-      void viewer;
-    }
   } else if (context === 'truth_dare') {
     const { data: member } = await supabase
       .from('td_room_members')

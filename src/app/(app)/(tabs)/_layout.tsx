@@ -1,8 +1,7 @@
 import React from 'react';
-import { Platform } from 'react-native';
+import { View } from 'react-native';
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { BlurView } from 'expo-blur';
 import { useTranslation } from 'react-i18next';
 
 export default function TabsLayout() {
@@ -23,7 +22,8 @@ export default function TabsLayout() {
           borderTopWidth: 0,
         },
         tabBarBackground: () => (
-          <BlurView intensity={Platform.OS === 'ios' ? 80 : 90} tint="dark" style={{ flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.7)' }} />
+          // plain translucent bar: expo-blur's native view is not in the installed dev build
+          <View style={{ flex: 1, backgroundColor: 'rgba(8, 8, 10, 0.92)' }} />
         ),
         tabBarActiveTintColor: '#fff',
         tabBarInactiveTintColor: 'rgba(255, 255, 255, 0.5)',
