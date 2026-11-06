@@ -228,7 +228,8 @@
     "languageTR": "Türkçe",
     "languageEN": "English",
     "languageES": "Español",
-    "languageAR": "العربية"
+    "languageAR": "العربية",
+    "biometricLock": "Bloqueo biométrico"
   },
   "safety": {
     "reportTitle": "Reportar",

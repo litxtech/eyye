@@ -14,7 +14,13 @@
         "NSCameraUsageDescription": "EyyE uses camera for photos, videos and game evidence.",
         "NSPhotoLibraryUsageDescription": "EyyE uses photo library for media sharing.",
         "NSMicrophoneUsageDescription": "EyyE uses microphone for voice chat and messages.",
-        "UIBackgroundModes": ["audio", "voip"]
+        "NSFaceIDUsageDescription": "EyyE uses Face ID to unlock the app.",
+        "NSPhotoLibraryAddUsageDescription": "EyyE saves shared media to your photo library.",
+        "UIBackgroundModes": [
+          "audio",
+          "voip",
+          "remote-notification"
+        ]
       }
     },
     "android": {
@@ -37,8 +43,15 @@
         {
           "action": "VIEW",
           "autoVerify": false,
-          "data": [{ "scheme": "eyye" }],
-          "category": ["BROWSABLE", "DEFAULT"]
+          "data": [
+            {
+              "scheme": "eyye"
+            }
+          ],
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
         }
       ]
     },
@@ -47,14 +60,39 @@
     },
     "plugins": [
       "expo-router",
-      ["expo-notifications", { "icon": "./assets/android-icon-foreground.png", "color": "#F5A623" }],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/android-icon-foreground.png",
+          "color": "#F5A623"
+        }
+      ],
       "expo-secure-store",
       "expo-apple-authentication",
       "expo-localization",
       "expo-image",
       "expo-web-browser",
       "expo-av",
-      "expo-font"
+      "expo-font",
+      "expo-sqlite",
+      "expo-camera",
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "EyyE uses your photo library to share media.",
+          "savePhotosPermission": "EyyE saves shared media to your photo library.",
+          "isAccessMediaLocationEnabled": false
+        }
+      ],
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "EyyE uses Face ID to unlock the app."
+        }
+      ],
+      "@config-plugins/react-native-webrtc",
+      "@livekit/react-native-expo-plugin",
+      "expo-updates"
     ],
     "extra": {
       "router": {},

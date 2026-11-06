@@ -10,6 +10,8 @@ import { useTheme } from '../../../theme/ThemeContext';
 import { useAppStore } from '../../../stores/appStore';
 import { supabase } from '../../../lib/supabase';
 import { connectVoice, disconnectVoice, setMic } from '../../../lib/livekit';
+import { gameFx } from '../../../lib/gameFx';
+import { compressImage, isVideoAsset } from '../../../lib/media';
 
 export default function TruthDareRoom() {
   const { t } = useTranslation();
@@ -60,6 +62,7 @@ export default function TruthDareRoom() {
   }, [data?.room?.status, data?.room?.livekit_room]);
 
   async function spin() {
+    void gameFx.spin();
     const { data: res, error } = await supabase.rpc('td_spin', { p_room: roomId });
     if (error) { Alert.alert(t('common.error'), error.message); return; }
     if (res?.error) Alert.alert(t('common.error'), res.error);
@@ -84,15 +87,18 @@ export default function TruthDareRoom() {
     const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images', 'videos'], quality: 0.8 });
     if (res.canceled || !res.assets?.[0]) return;
     const asset = res.assets[0];
-    const ext = asset.uri.split('.').pop()?.split('?')[0] ?? 'jpg';
+    const isVideo = isVideoAsset(asset);
+    // compress images before upload; videos pass through
+    const media = isVideo ? { uri: asset.uri, mime: asset.mimeType ?? 'video/mp4' } : await compressImage(asset.uri);
+    const ext = media.uri.split('.').pop()?.split('?')[0] ?? (isVideo ? 'mp4' : 'jpg');
     const path = `proofs/${roomId}/${turnId}/${Date.now()}.${ext}`;
     // upload via media-upload-url signed URL
-    const { data: up } = await supabase.functions.invoke('media-upload-url', { body: { path, contentType: asset.mimeType ?? 'image/jpeg' } });
+    const { data: up } = await supabase.functions.invoke('media-upload-url', { body: { path, contentType: media.mime } });
     if (!up?.url) { Alert.alert('Yükleme hatası'); return; }
-    const blob = await (await fetch(asset.uri)).blob();
-    const put = await fetch(up.url, { method: 'PUT', body: blob, headers: { 'Content-Type': asset.mimeType ?? 'image/jpeg' } });
+    const blob = await (await fetch(media.uri)).blob();
+    const put = await fetch(up.url, { method: 'PUT', body: blob, headers: { 'Content-Type': media.mime } });
     if (!put.ok) { Alert.alert('Yükleme başarısız'); return; }
-    const { error } = await supabase.rpc('td_submit_proof', { p_turn: turnId, p_media_url: up.publicUrl ?? path, p_media_type: asset.type === 'video' ? 'video' : 'image' });
+    const { error } = await supabase.rpc('td_submit_proof', { p_turn: turnId, p_media_url: up.publicUrl ?? path, p_media_type: isVideo ? 'video' : 'image' });
     if (error) Alert.alert(t('common.error'), error.message);
     void load();
   }

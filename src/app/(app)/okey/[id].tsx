@@ -10,6 +10,7 @@ import { useTheme } from '../../../theme/ThemeContext';
 import { useAppStore } from '../../../stores/appStore';
 import { supabase } from '../../../lib/supabase';
 import { connectVoice, disconnectVoice, setMic, getVoiceRoom } from '../../../lib/livekit';
+import { gameFx } from '../../../lib/gameFx';
 
 const SEAT_POS: any[] = [
   { bottom: 8, alignSelf: 'center' },   // 0 bottom (me)
@@ -95,6 +96,9 @@ export default function OkeyTable() {
   }, [data?.table?.status, data?.table?.livekit_room]);
 
   async function act(action: string, payload?: any) {
+    if (action === 'discard') void gameFx.tileDiscard();
+    else if (action === 'draw_stock' || action === 'draw_discard') void gameFx.draw();
+    else if (action === 'finish') void gameFx.win();
     const { data: res, error } = await supabase.functions.invoke('okey-action', { body: { table_id: tableId, action, payload } });
     if (error) {
       const msg = (error as any)?.message ?? '';
@@ -106,6 +110,7 @@ export default function OkeyTable() {
   }
 
   function toggleTile(id: number) {
+    void gameFx.tilePick();
     const next = new Set(selected);
     if (next.has(id)) next.delete(id); else next.add(id);
     setSelected(next);

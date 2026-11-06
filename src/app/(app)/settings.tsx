@@ -7,6 +7,7 @@ import { Screen, Header, Button } from '../../components/ui';
 import { useTheme } from '../../theme/ThemeContext';
 import { useAppStore } from '../../stores/appStore';
 import { signOut } from '../../lib/auth';
+import { biometricAvailable, biometricAuthenticate } from '../../lib/biometric';
 import { supabase } from '../../lib/supabase';
 import type { ThemeName, Language } from '../../theme';
 import i18n from '../../i18n';
@@ -36,6 +37,16 @@ export default function SettingsScreen() {
       rows: [
         { icon: 'shield-checkmark-outline', label: t('settings.privateAccount'), route: '/privacy-settings' },
         { icon: 'ban-outline', label: t('settings.blockedUsers'), route: '/blocked-users' },
+        { icon: 'finger-print-outline', label: t('settings.biometricLock'), action: async () => {
+          const available = await biometricAvailable();
+          if (!available) { Alert.alert(t('common.error'), 'Bu cihazda biyometrik doğrulama yok'); return; }
+          const ok = await biometricAuthenticate('Biyometrik kilidi açmak için doğrula');
+          if (ok) {
+            const cur = useAppStore.getState().biometricLock;
+            useAppStore.getState().setBiometricLock(!cur);
+            Alert.alert('', cur ? 'Biyometrik kilit kapatıldı' : 'Biyometrik kilit açıldı');
+          }
+        }},
       ],
     },
     {

@@ -10,10 +10,12 @@ interface AppState {
   language: Language | null; // null = follow device
   session: Session | null;
   sessionLoaded: boolean;
+  biometricLock: boolean;
   setTheme: (t: ThemeName) => void;
   setLanguage: (l: Language | null) => void;
   setSession: (s: Session | null) => void;
   setSessionLoaded: (v: boolean) => void;
+  setBiometricLock: (v: boolean) => void;
 }
 
 export const useAppStore = create<AppState>()(
@@ -23,15 +25,17 @@ export const useAppStore = create<AppState>()(
       language: null,
       session: null,
       sessionLoaded: false,
+      biometricLock: false,
       setTheme: (theme) => set({ theme }),
       setLanguage: (language) => set({ language }),
       setSession: (session) => set({ session }),
       setSessionLoaded: (sessionLoaded) => set({ sessionLoaded }),
+      setBiometricLock: (biometricLock) => set({ biometricLock }),
     }),
     {
       name: 'eyye-app-store',
       storage: createJSONStorage(() => AsyncStorage),
-      partialize: (s) => ({ theme: s.theme, language: s.language }),
+      partialize: (s) => ({ theme: s.theme, language: s.language, biometricLock: s.biometricLock }),
     }
   )
 );
