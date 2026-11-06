@@ -47,3 +47,12 @@ export function setupNotificationResponseHandler(onOpen: (data: any) => void) {
     onOpen(res.notification.request.content.data ?? {});
   });
 }
+
+export async function getLastNotificationResponse() {
+  try {
+    const res = await Notifications.getLastNotificationResponseAsync();
+    return res?.notification.request.content.data ?? null;
+  } catch {
+    return null;
+  }
+}

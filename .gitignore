@@ -2,3 +2,4 @@ node_modules/
 dist/
 .env
 .expo/
+firebase-adminsdk.json

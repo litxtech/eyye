@@ -6,19 +6,22 @@
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
+    "scheme": "eyye",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.eyye.app",
+      "bundleIdentifier": "com.litxtech.eyyeapp",
       "infoPlist": {
-        "NSCameraUsageDescription": "EyyE uses camera for photos and videos.",
+        "NSCameraUsageDescription": "EyyE uses camera for photos, videos and game evidence.",
         "NSPhotoLibraryUsageDescription": "EyyE uses photo library for media sharing.",
-        "NSMicrophoneUsageDescription": "EyyE uses microphone for voice messages."
+        "NSMicrophoneUsageDescription": "EyyE uses microphone for voice chat and messages.",
+        "UIBackgroundModes": ["audio", "voip"]
       }
     },
     "android": {
-      "package": "com.eyye.app",
+      "package": "com.litxtech.eyyeapp",
+      "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
+        "backgroundColor": "#1A120B",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
@@ -26,7 +29,17 @@
       "permissions": [
         "CAMERA",
         "RECORD_AUDIO",
-        "POST_NOTIFICATIONS"
+        "POST_NOTIFICATIONS",
+        "MODIFY_AUDIO_SETTINGS",
+        "BLUETOOTH_CONNECT"
+      ],
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": false,
+          "data": [{ "scheme": "eyye" }],
+          "category": ["BROWSABLE", "DEFAULT"]
+        }
       ]
     },
     "web": {
@@ -34,8 +47,8 @@
     },
     "plugins": [
       "expo-router",
+      ["expo-notifications", { "icon": "./assets/android-icon-foreground.png", "color": "#F5A623" }],
       "expo-secure-store",
-      "expo-notifications",
       "expo-apple-authentication",
       "expo-localization",
       "expo-image",
@@ -43,6 +56,11 @@
       "expo-av",
       "expo-font"
     ],
-    "scheme": "eyye"
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "60ccbe37-9d14-478f-928a-ebd2d0169fb4"
+      }
+    }
   }
 }
