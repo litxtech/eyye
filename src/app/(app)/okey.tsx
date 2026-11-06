@@ -45,11 +45,18 @@ export default function OkeyLobby() {
       const { data } = await supabase.from('okey_tables').select('id').eq('livekit_room', tableId).maybeSingle();
       tableId = data?.id ?? tableId;
     }
-    const { data: seat, error } = await supabase.rpc('okey_join_table', { p_table: tableId, p_password: joinPw || null });
+    let { data: seat, error } = await supabase.rpc('okey_join_table', { p_table: tableId, p_password: joinPw || null });
+    let role: 'player' | 'spectator' = 'player';
+    if (error && (error.message.includes('table_full') || error.message.includes('game_started'))) {
+      // table not joinable as player -> try spectator
+      const { error: werr } = await supabase.rpc('okey_watch', { p_table: tableId, p_password: joinPw || null });
+      if (werr) { setBusy(false); Alert.alert(t('common.error'), werr.message); return; }
+      role = 'spectator'; seat = -1;
+    }
     setBusy(false);
-    if (error) { Alert.alert(t('common.error'), error.message.includes('bad_password') ? 'Wrong password' : error.message); return; }
+    if (error && role === 'player') { Alert.alert(t('common.error'), error.message.includes('bad_password') ? 'Wrong password' : error.message); return; }
     const { data: tbl } = await supabase.from('okey_tables').select('livekit_room, status').eq('id', tableId).single();
-    router.push({ pathname: '/okey/[id]', params: { id: tableId, room: tbl?.livekit_room, role: seat === -1 ? 'spectator' : 'player', seat } });
+    router.push({ pathname: '/okey/[id]', params: { id: tableId, room: tbl?.livekit_room, role, seat: seat ?? 0 } });
   }
 
   return (

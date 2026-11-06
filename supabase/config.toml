@@ -2,3 +2,6 @@ project_id = "boemlouaslpxwnuojfaz"
 
 [functions.send-push]
 verify_jwt = false
+
+[functions.media-process]
+verify_jwt = false

@@ -26,6 +26,7 @@ export default function OkeyTable() {
   const tableId = params.id;
   const uid = useAppStore((s) => s.session?.user.id);
   const [data, setData] = useState<any>(null);
+  const [profiles, setProfiles] = useState<Record<string, any>>({});
   const [hand, setHand] = useState<number[]>([]);
   const [melds, setMelds] = useState<number[][]>([]);
   const [selected, setSelected] = useState<Set<number>>(new Set());
@@ -48,6 +49,14 @@ export default function OkeyTable() {
     setData(data);
     if (data?.my_hand) setHand(data.my_hand);
     if (data?.my_melds) setMelds(data.my_melds);
+    // players payload has no profile join — fetch separately
+    const ids = (data?.players ?? []).map((p: any) => p.user_id).filter(Boolean);
+    if (ids.length) {
+      const { data: profs } = await supabase.from('profiles').select('id, display_name, username, avatar_url').in('id', ids);
+      const map: Record<string, any> = {};
+      for (const p of profs ?? []) map[p.id] = p;
+      setProfiles(map);
+    }
   }, [tableId]);
 
   useEffect(() => {
@@ -97,7 +106,7 @@ export default function OkeyTable() {
 
   async function act(action: string, payload?: any) {
     if (action === 'discard') void gameFx.tileDiscard();
-    else if (action === 'draw_stock' || action === 'draw_discard') void gameFx.draw();
+    else if (action === 'draw_stock' || action === 'take_discard') void gameFx.draw();
     else if (action === 'finish') void gameFx.win();
     const { data: res, error } = await supabase.functions.invoke('okey-action', { body: { table_id: tableId, action, payload } });
     if (error) {
@@ -207,17 +216,20 @@ export default function OkeyTable() {
             </View>
           </View>
 
-          {/* seats */}
+          {/* seats — rotated so my seat is always bottom */}
           {[0, 1, 2, 3].map((seat) => {
             const p = seatPlayer(seat);
-            const pos = SEAT_POS[seat];
+            const mySeat = data.my_seat ?? 0;
+            const rel = ((seat - mySeat) % 4 + 4) % 4;
+            const pos = SEAT_POS[rel];
             const isTurn = data.state?.turn_seat === seat && status === 'playing';
+            const prof = p?.user_id ? profiles[p.user_id] : null;
             return (
               <View key={seat} style={[{ position: 'absolute', alignItems: 'center', maxWidth: 110 }, pos]}>
                 <TouchableOpacity onPress={() => p?.user_id && setProfileUser(p.user_id)}>
                   <View style={{ borderRadius: 30, borderWidth: isTurn ? 3 : 1.5, borderColor: isTurn ? theme.colors.accent : '#6B4A1F', padding: 2 }}>
                     {p?.user_id ? (
-                      <Avatar uri={(players.find((x) => x.user_id === p.user_id) as any)?.profile?.avatar_url} name={(players.find((x) => x.user_id === p.user_id) as any)?.profile?.display_name} size={52} />
+                      <Avatar uri={prof?.avatar_url} name={prof?.display_name} size={52} />
                     ) : (
                       <View style={{ width: 52, height: 52, borderRadius: 26, backgroundColor: '#33241A', alignItems: 'center', justifyContent: 'center' }}>
                         <Ionicons name="person-add-outline" size={22} color="#8A7A5A" />
@@ -227,7 +239,7 @@ export default function OkeyTable() {
                   {isTurn && <View style={{ position: 'absolute', top: -6, alignSelf: 'center', backgroundColor: theme.colors.accent, borderRadius: 8, paddingHorizontal: 6 }}><Text style={{ color: '#000', fontSize: 9, fontWeight: '800' }}>●</Text></View>}
                 </TouchableOpacity>
                 <Text style={{ color: '#E8DCC0', fontSize: 10, fontWeight: '600', marginTop: 3 }} numberOfLines={1}>
-                  {p?.is_bot ? '🤖 Bot' : p?.user_id === uid ? 'Sen' : (players.find((x) => x.user_id === p?.user_id) as any)?.profile?.display_name ?? '—'}
+                  {p?.is_bot ? '🤖 Bot' : p?.user_id === uid ? 'Sen' : prof?.display_name ?? '—'}
                 </Text>
                 <Text style={{ color: '#B8A888', fontSize: 9 }}>{p ? `${p.score ?? 0}p` : ''}{p && seat !== data.my_seat ? ` · ${players.find((x) => x.seat === seat)?.hand_count ?? '?'}` : ''}</Text>
               </View>
@@ -256,9 +268,14 @@ export default function OkeyTable() {
                 <Text style={{ color: '#C9A86A', fontSize: 16, fontWeight: '800' }}>{stockCount}</Text>
               </View>
               {isMyTurn && (
-                <TouchableOpacity onPress={() => act('draw_stock')} style={{ paddingHorizontal: 14, justifyContent: 'center', borderRadius: 10, backgroundColor: theme.colors.accentSoft, borderWidth: 1, borderColor: theme.colors.accent }}>
-                  <Text style={{ color: theme.colors.accent, fontSize: 12, fontWeight: '700' }}>Çek</Text>
-                </TouchableOpacity>
+                <>
+                  <TouchableOpacity onPress={() => act('draw_stock')} style={{ paddingHorizontal: 14, justifyContent: 'center', borderRadius: 10, backgroundColor: theme.colors.accentSoft, borderWidth: 1, borderColor: theme.colors.accent }}>
+                    <Text style={{ color: theme.colors.accent, fontSize: 12, fontWeight: '700' }}>Çek</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={() => act('take_discard')} style={{ paddingHorizontal: 14, justifyContent: 'center', borderRadius: 10, backgroundColor: theme.colors.surfaceAlt, borderWidth: 1, borderColor: theme.colors.border }}>
+                    <Text style={{ color: theme.colors.text, fontSize: 12, fontWeight: '700' }}>Yandan Al</Text>
+                  </TouchableOpacity>
+                </>
               )}
             </View>
             <View style={{ flexDirection: 'row', gap: 8 }}>
