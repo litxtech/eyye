@@ -36,9 +36,19 @@ export default function AppLayout() {
     if (session?.user) {
       void registerForPushNotifications(session.user.id);
       void supabase.from('profiles').update({ online: true, last_seen_at: new Date().toISOString() }).eq('id', session.user.id);
-      const iv = setInterval(() => {
-        void supabase.from('profiles').update({ last_seen_at: new Date().toISOString() }).eq('id', session.user.id);
-      }, 60000);
+      const heartbeat = async () => {
+        // session guard: only forced logout on ban/suspension/deletion — never on network errors
+        const { data: prof, error } = await supabase.from('profiles').select('status').eq('id', session.user.id).maybeSingle();
+        if (!error) {
+          if (!prof || prof.status === 'banned' || prof.status === 'suspended') {
+            await supabase.auth.signOut();
+            return;
+          }
+        }
+        await supabase.from('profiles').update({ last_seen_at: new Date().toISOString() }).eq('id', session.user.id);
+      };
+      void heartbeat();
+      const iv = setInterval(() => { void heartbeat(); }, 60000);
       return () => clearInterval(iv);
     }
   }, [session?.user?.id]);

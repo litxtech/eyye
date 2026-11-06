@@ -92,7 +92,10 @@
       ],
       "@config-plugins/react-native-webrtc",
       "@livekit/react-native-expo-plugin",
-      "expo-updates"
+      "expo-updates",
+      "react-native-maps",
+      "@rnmapbox/maps",
+      "./plugins/withMapbox"
     ],
     "extra": {
       "router": {},

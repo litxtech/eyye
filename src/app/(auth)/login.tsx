@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { View, Text, TouchableOpacity, KeyboardAvoidingView, Platform, ScrollView, FlatList } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { Link, router } from 'expo-router';
-import { Screen, Button, Input } from '../../components/ui';
+import { Screen, Button, Input, Avatar } from '../../components/ui';
 import { useTheme } from '../../theme/ThemeContext';
 import { signIn, signInWithApple, signInWithGoogle } from '../../lib/auth';
+import { listAccounts, getAccountPassword, removeAccount, type SavedAccount } from '../../lib/accounts';
 
 export default function LoginScreen() {
   const { t } = useTranslation();
@@ -14,16 +15,41 @@ export default function LoginScreen() {
   const [showPw, setShowPw] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [accounts, setAccounts] = useState<SavedAccount[]>([]);
+
+  useEffect(() => { void listAccounts().then(setAccounts); }, []);
+
+  async function refreshAccounts() { setAccounts(await listAccounts()); }
+
+  async function quickLogin(acc: SavedAccount) {
+    if (loading) return;
+    setLoading(true); setError('');
+    const pw = await getAccountPassword(acc.email);
+    if (!pw) { setLoading(false); setError('Kayıtlı şifre bulunamadı'); return; }
+    setEmail(acc.email); setPassword(pw);
+    const { data, error: err } = await signIn(acc.email, pw);
+    setLoading(false);
+    if (err) { setError(err.message); return; }
+    if (data.user) {
+      const { saveAccount } = await import('../../lib/accounts');
+      void saveAccount(data.user.id, acc.email, pw);
+    }
+    router.replace('/(app)/chats');
+  }
 
   async function handleLogin() {
     if (loading) return;
     if (!email.includes('@')) { setError(t('auth.emailInvalid')); return; }
     setLoading(true); setError('');
-    const { error: err } = await signIn(email, password);
+    const { data, error: err } = await signIn(email, password);
     setLoading(false);
     if (err) {
       setError(err.message.includes('Invalid login') ? t('auth.wrongCredentials', 'E-posta veya şifre hatalı') : err.message);
       return;
+    }
+    if (data.user) {
+      const { saveAccount } = await import('../../lib/accounts');
+      void saveAccount(data.user.id, email, password).then(refreshAccounts);
     }
     router.replace('/(app)/chats');
   }
@@ -46,6 +72,30 @@ export default function LoginScreen() {
           <Text style={{ color: theme.colors.textSecondary, fontSize: theme.typography.sizes.lg, textAlign: 'center', marginBottom: theme.spacing(8) }}>
             {t('auth.welcome')}
           </Text>
+
+          {accounts.length > 0 && (
+            <View style={{ marginBottom: theme.spacing(5) }}>
+              <Text style={{ color: theme.colors.textMuted, fontSize: theme.typography.sizes.xs, marginBottom: theme.spacing(2), textAlign: 'center' }}>Hızlı giriş</Text>
+              <FlatList
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                data={accounts}
+                keyExtractor={(a) => a.email}
+                contentContainerStyle={{ gap: theme.spacing(4), paddingHorizontal: theme.spacing(2) }}
+                renderItem={({ item }) => (
+                  <View style={{ alignItems: 'center', width: 72 }}>
+                    <TouchableOpacity onPress={() => void quickLogin(item)}>
+                      <Avatar uri={item.avatarUrl} name={item.displayName ?? item.email} size={52} />
+                    </TouchableOpacity>
+                    <Text style={{ color: theme.colors.textSecondary, fontSize: 10, marginTop: 4 }} numberOfLines={1}>{item.displayName ?? item.email.split('@')[0]}</Text>
+                    <TouchableOpacity onPress={() => void removeAccount(item.email).then(refreshAccounts)} style={{ position: 'absolute', top: -4, right: 4, backgroundColor: theme.colors.surface, borderRadius: 9, width: 18, height: 18, alignItems: 'center', justifyContent: 'center' }}>
+                      <Text style={{ color: theme.colors.danger, fontSize: 11, fontWeight: '800' }}>×</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+              />
+            </View>
+          )}
 
           <Input label={t('auth.email')} value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" autoComplete="email" />
           <View>
