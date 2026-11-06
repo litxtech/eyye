@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Text, TextInput, TouchableOpacity, ActivityIndicator, StyleSheet, TextInputProps } from 'react-native';
 import { Image } from 'expo-image';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../theme/ThemeContext';
 import { useTranslation } from 'react-i18next';
 
@@ -92,11 +93,13 @@ export function Avatar({ uri, name, size = 44 }: { uri?: string | null; name?: s
 export function Header({ title, right, left }: { title: string; right?: React.ReactNode; left?: React.ReactNode }) {
   const theme = useTheme();
   return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: theme.spacing(4), paddingVertical: theme.spacing(3), borderBottomWidth: 1, borderBottomColor: theme.colors.border }}>
-      {left}
-      <Text style={{ flex: 1, color: theme.colors.text, fontSize: theme.typography.sizes.lg, fontWeight: '700', textAlign: 'center' }}>{title}</Text>
-      <View style={{ minWidth: 40, alignItems: 'flex-end' }}>{right}</View>
-    </View>
+    <SafeAreaView edges={['top']} style={{ backgroundColor: theme.colors.background }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: theme.spacing(4), paddingVertical: theme.spacing(3), borderBottomWidth: 1, borderBottomColor: theme.colors.border }}>
+        {left}
+        <Text style={{ flex: 1, color: theme.colors.text, fontSize: theme.typography.sizes.lg, fontWeight: '700', textAlign: 'center' }}>{title}</Text>
+        <View style={{ minWidth: 40, alignItems: 'flex-end' }}>{right}</View>
+      </View>
+    </SafeAreaView>
   );
 }
 

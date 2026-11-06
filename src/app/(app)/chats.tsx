@@ -3,7 +3,7 @@ import { View, Text, FlatList, TouchableOpacity, RefreshControl } from 'react-na
 import { useTranslation } from 'react-i18next';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { Screen, Avatar } from '../../components/ui';
+import { Screen, Avatar, Header } from '../../components/ui';
 import { useTheme } from '../../theme/ThemeContext';
 import { useAppStore } from '../../stores/appStore';
 import { supabase } from '../../lib/supabase';
@@ -146,15 +146,19 @@ export default function ChatsScreen() {
 
   return (
     <Screen>
-      <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: theme.spacing(4), paddingTop: theme.spacing(6), paddingBottom: theme.spacing(3) }}>
-        <Text style={{ flex: 1, color: theme.colors.text, fontSize: theme.typography.sizes.xxl, fontWeight: '800' }}>{t('app.name')}</Text>
-        <TouchableOpacity onPress={() => router.push('/notifications')} style={{ marginRight: theme.spacing(4) }}>
-          <Ionicons name="notifications-outline" size={24} color={theme.colors.text} />
-        </TouchableOpacity>
-        <TouchableOpacity onPress={() => router.push('/new-chat')}>
-          <Ionicons name="create-outline" size={26} color={theme.colors.accent} />
-        </TouchableOpacity>
-      </View>
+      <Header 
+        title={t('app.name')} 
+        right={
+          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+            <TouchableOpacity onPress={() => router.push('/notifications')} style={{ marginRight: theme.spacing(4) }}>
+              <Ionicons name="notifications-outline" size={24} color={theme.colors.text} />
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => router.push('/new-chat')}>
+              <Ionicons name="create-outline" size={26} color={theme.colors.accent} />
+            </TouchableOpacity>
+          </View>
+        }
+      />
       <TouchableOpacity onPress={() => setShowArchived(!showArchived)} style={{ paddingHorizontal: theme.spacing(4), paddingBottom: theme.spacing(2) }}>
         <Text style={{ color: theme.colors.accent, fontSize: theme.typography.sizes.sm }}>{showArchived ? '‹ ' + t('common.back') : t('chat.archiveChat') + ' ›'}</Text>
       </TouchableOpacity>

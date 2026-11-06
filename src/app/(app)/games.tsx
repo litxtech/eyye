@@ -1,14 +1,31 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, FlatList } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { router } from 'expo-router';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { Screen } from '../../components/ui';
 import { useTheme } from '../../theme/ThemeContext';
 
 const GAMES = [
-  { id: 'okey', icon: 'albums', title: 'VIP Okey', desc: '4 oyunculu premium masa oyunu', route: '/okey' },
-  { id: 'truth', icon: 'heart', title: 'Doğruluk / Cesaret', desc: 'Çark çevir, kanıtla', route: '/truth-dare' },
+  {
+    id: 'okey',
+    icon: 'albums',
+    title: 'VIP Okey',
+    desc: '4 oyunculu premium masa',
+    desc2: 'LiveKit sesli sohbetli',
+    route: '/okey',
+    color: '#E8C97A',
+  },
+  {
+    id: 'truth',
+    icon: 'heart',
+    title: 'Doğruluk / Cesaret',
+    desc: 'Çark çevir, kanıtla',
+    desc2: 'Özel odalar, tek-görüntüleme',
+    route: '/truth-dare',
+    color: '#E85D75',
+  },
 ];
 
 export default function GamesScreen() {
@@ -16,29 +33,59 @@ export default function GamesScreen() {
   const theme = useTheme();
   return (
     <Screen>
-      <View style={{ paddingHorizontal: theme.spacing(4), paddingTop: theme.spacing(8), paddingBottom: theme.spacing(3) }}>
-        <Text style={{ color: theme.colors.text, fontSize: theme.typography.sizes.xxl, fontWeight: '800' }}>{t('tabs.games')}</Text>
-      </View>
-      <FlatList
-        data={GAMES}
-        keyExtractor={(g) => g.id}
-        contentContainerStyle={{ padding: theme.spacing(4), gap: theme.spacing(4) }}
-        renderItem={({ item }) => (
+      <ScrollView contentContainerStyle={{ padding: theme.spacing(4), paddingTop: theme.spacing(8) }}>
+        <Text style={{ color: theme.colors.text, fontSize: theme.typography.sizes.xxl, fontWeight: '800', marginBottom: theme.spacing(4) }}>
+          {t('tabs.games')}
+        </Text>
+        {GAMES.map((g) => (
           <TouchableOpacity
-            onPress={() => router.push(item.route as any)}
-            style={{
-              backgroundColor: theme.colors.card, borderRadius: theme.radii.lg, padding: theme.spacing(5),
-              borderWidth: 1, borderColor: theme.colors.border, ...theme.effects.cardShadow,
-            }}
+            key={g.id}
+            onPress={() => router.push({ pathname: g.route })}
+            style={styles.card}
+            activeOpacity={0.85}
           >
-            <View style={{ width: 52, height: 52, borderRadius: 26, backgroundColor: theme.colors.accentSoft, alignItems: 'center', justifyContent: 'center', marginBottom: theme.spacing(3) }}>
-              <Ionicons name={item.icon as any} size={26} color={theme.colors.accent} />
+            <LinearGradient
+              colors={[g.color + '22', 'transparent']}
+              start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+              style={styles.cardGradient}
+            />
+            <View style={styles.iconWrap}>
+              <Ionicons name={g.icon as any} size={28} color={g.color} />
             </View>
-            <Text style={{ color: theme.colors.text, fontSize: theme.typography.sizes.lg, fontWeight: '700' }}>{item.title}</Text>
-            <Text style={{ color: theme.colors.textSecondary, marginTop: 4 }}>{item.desc}</Text>
+            <View style={{ flex: 1, marginLeft: theme.spacing(4) }}>
+              <Text style={{ color: theme.colors.text, fontSize: theme.typography.sizes.lg, fontWeight: '700' }}>{g.title}</Text>
+              <Text style={{ color: theme.colors.textSecondary, fontSize: theme.typography.sizes.sm, marginTop: 2 }}>{g.desc}</Text>
+              <Text style={{ color: theme.colors.textMuted, fontSize: theme.typography.sizes.xs, marginTop: 1 }}>{g.desc2}</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={22} color={theme.colors.textMuted} />
           </TouchableOpacity>
-        )}
-      />
+        ))}
+      </ScrollView>
     </Screen>
   );
 }
+
+const styles = StyleSheet.create({
+  card: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#141010',
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: '#2A1A12',
+    padding: 16,
+    marginBottom: 16,
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  cardGradient: {
+    position: 'absolute',
+    top: 0, left: 0, right: 0, bottom: 0,
+  },
+  iconWrap: {
+    width: 52, height: 52, borderRadius: 14,
+    backgroundColor: '#241811',
+    alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1, borderColor: '#3A2A1A',
+  },
+});
