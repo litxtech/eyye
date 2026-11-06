@@ -1,13 +1,17 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { View, Text, FlatList, TouchableOpacity, TextInput, Alert, Keyboard, Modal, Pressable } from 'react-native';
+import { View, Text, FlatList, TouchableOpacity, TextInput, Alert, Keyboard, Modal, Pressable, Image, ActivityIndicator } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { useLocalSearchParams, router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
+import * as DocumentPicker from 'expo-document-picker';
 import { Screen, Avatar } from '../../../components/ui';
 import { useTheme } from '../../../theme/ThemeContext';
 import { useAppStore } from '../../../stores/appStore';
 import { supabase } from '../../../lib/supabase';
 import * as Clipboard from 'expo-clipboard';
+import { uploadMedia, type UploadContext } from '../../../lib/mediaUpload';
+import { compressImage, isVideoAsset } from '../../../lib/media';
 
 interface Msg {
   id: string;
@@ -19,6 +23,7 @@ interface Msg {
   edited_at: string | null;
   deleted_for_everyone_at: string | null;
   reply_to: string | null;
+  metadata?: any;
   reactions?: { emoji: string; user_id: string }[];
 }
 
@@ -45,7 +50,7 @@ export default function ChatScreen() {
     if (!convId) return;
     const { data } = await supabase
       .from('messages')
-      .select('id, client_id, sender_id, content, type, created_at, edited_at, deleted_for_everyone_at, reply_to')
+      .select('id, client_id, sender_id, content, type, created_at, edited_at, deleted_for_everyone_at, reply_to, metadata')
       .eq('conversation_id', convId)
       .order('created_at', { ascending: false })
       .limit(50);
@@ -162,6 +167,105 @@ export default function ChatScreen() {
     await supabase.from('message_drafts').delete().eq('conversation_id', convId).eq('user_id', uid);
   }
 
+  // ---------- media messages ----------
+  const [attachOpen, setAttachOpen] = useState(false);
+  const [viewer, setViewer] = useState<{ url: string; type: string } | null>(null);
+
+  const mediaContext: UploadContext = params.type === 'group' ? 'group_chat' : 'message';
+
+  async function pickMedia(source: 'library' | 'camera' | 'file') {
+    setAttachOpen(false);
+    try {
+      let asset: any = null;
+      if (source === 'library') {
+        const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images', 'videos'], quality: 0.9, videoMaxDuration: 300 });
+        if (res.canceled || !res.assets?.[0]) return;
+        asset = res.assets[0];
+      } else if (source === 'camera') {
+        const perm = await ImagePicker.requestCameraPermissionsAsync();
+        if (!perm.granted) { Alert.alert('İzin gerekli', 'Kamera izni verilmedi'); return; }
+        const res = await ImagePicker.launchCameraAsync({ mediaTypes: ['images', 'videos'], quality: 0.9, videoMaxDuration: 300 });
+        if (res.canceled || !res.assets?.[0]) return;
+        asset = res.assets[0];
+      } else {
+        const res = await DocumentPicker.getDocumentAsync({ type: '*/*', copyToCacheDirectory: true });
+        if (res.canceled || !res.assets?.[0]) return;
+        asset = res.assets[0];
+      }
+      await sendMedia(asset, source === 'file');
+    } catch (e: any) {
+      Alert.alert('Hata', e?.message ?? 'Medya seçilemedi');
+    }
+  }
+
+  async function sendMedia(asset: any, isFile = false) {
+    if (!uid || !convId || !asset?.uri) return;
+    const isVideo = !isFile && isVideoAsset(asset);
+    const kind: 'image' | 'video' | 'file' = isFile ? 'file' : isVideo ? 'video' : 'image';
+    const msgType = isFile ? 'file' : kind;
+    const mime = asset.mimeType ?? (isVideo ? 'video/mp4' : 'image/jpeg');
+    const size = asset.fileSize ?? asset.size ?? 0;
+
+    const clientId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const optimistic: Msg = {
+      id: `opt-${clientId}`, client_id: clientId, sender_id: uid,
+      content: isFile ? (asset.name ?? 'Dosya') : null,
+      type: msgType, created_at: new Date().toISOString(),
+      edited_at: null, deleted_for_everyone_at: null, reply_to: replyTo?.id ?? null,
+      metadata: { uploading: true, progress: 0, mime, width: asset.width, height: asset.height, name: asset.name },
+      reactions: [],
+    };
+    setMessages((prev) => [optimistic, ...prev]);
+    setReplyTo(null);
+
+    // insert row immediately so recipient sees "uploading" bubble
+    const { data: row, error: insErr } = await supabase.from('messages').insert({
+      conversation_id: convId, sender_id: uid, type: msgType,
+      client_id: clientId, reply_to: optimistic.reply_to,
+      metadata: optimistic.metadata,
+    }).select().single();
+    if (insErr || !row) {
+      setMessages((prev) => prev.filter((m) => m.id !== optimistic.id));
+      Alert.alert('Hata', insErr?.message ?? 'Mesaj gönderilemedi');
+      return;
+    }
+    seenIds.current.add(row.id);
+    const realId = row.id;
+    setMessages((prev) => prev.map((m) => m.id === optimistic.id ? { ...m, id: realId, metadata: { ...m.metadata, message_id: realId } } : m));
+
+    try {
+      const media = (!isVideo && !isFile) ? await compressImage(asset.uri) : { uri: asset.uri, mime };
+      const result = await uploadMedia({
+        uri: media.uri, fileName: asset.fileName ?? asset.name, mime: media.mime,
+        size: size || 1, kind, context: mediaContext,
+        width: asset.width, height: asset.height, durationSec: asset.duration ? Math.round(asset.duration / 1000) : undefined,
+      }, {
+        onProgress: (pct) => setMessages((prev) => prev.map((m) => m.id === realId ? { ...m, metadata: { ...m.metadata, progress: pct } } : m)),
+      });
+      const meta = {
+        asset_id: result.assetId, r2_key: result.r2Key, mime: media.mime,
+        uploading: false, width: asset.width, height: asset.height,
+        duration_ms: asset.duration ? Math.round(asset.duration) : undefined,
+        size_bytes: size, name: asset.name,
+      };
+      await supabase.from('messages').update({ metadata: meta }).eq('id', realId);
+      await supabase.from('message_attachments').insert({
+        message_id: realId, type: kind, url: result.r2Key, mime: media.mime,
+        size_bytes: size, duration_ms: meta.duration_ms, width: asset.width, height: asset.height,
+      }).then(() => {}, () => {});
+      setMessages((prev) => prev.map((m) => m.id === realId ? { ...m, metadata: meta } : m));
+    } catch (e: any) {
+      setMessages((prev) => prev.map((m) => m.id === realId ? { ...m, metadata: { ...m.metadata, uploading: false, failed: true, error: e?.message } } : m));
+    }
+  }
+
+  async function openMedia(m: Msg) {
+    const key = m.metadata?.r2_key;
+    if (!key) return;
+    const { data } = await supabase.functions.invoke('media-upload-url', { body: { action: 'download', path: key } });
+    if (data?.url) setViewer({ url: data.url, type: m.type });
+  }
+
   async function saveDraft(v: string) {
     if (!uid || !convId) return;
     if (v.trim()) {
@@ -233,10 +337,27 @@ export default function ChatScreen() {
               </Text>
             </View>
           )}
+          {item.type === 'image' && item.metadata?.r2_key && !deleted ? (
+            <MediaImage message={item} mine={mine} onPress={() => void openMedia(item)} />
+          ) : item.type === 'video' && !deleted ? (
+            <MediaVideo message={item} mine={mine} onPress={() => void openMedia(item)} />
+          ) : item.type === 'file' && !deleted ? (
+            <FileBubble message={item} mine={mine} onPress={() => void openMedia(item)} />
+          ) : (
           <Text style={{ color: deleted ? theme.colors.textMuted : mine ? theme.colors.bubbleMineText : theme.colors.bubbleTheirsText, fontSize: theme.typography.sizes.md, lineHeight: 21 }}>
             {deleted ? t('chat.messageDeleted') : item.content}
             {item.edited_at && !deleted ? <Text style={{ fontSize: theme.typography.sizes.xs, opacity: 0.6 }}> {t('common.edited')}</Text> : undefined}
           </Text>
+          )}
+          {item.metadata?.uploading && (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 }}>
+              <ActivityIndicator size="small" color={mine ? theme.colors.bubbleMineText : theme.colors.accent} />
+              <Text style={{ color: mine ? theme.colors.bubbleMineText : theme.colors.textSecondary, fontSize: 11 }}>{item.metadata.progress ?? 0}%</Text>
+            </View>
+          )}
+          {item.metadata?.failed && (
+            <Text style={{ color: theme.colors.danger, fontSize: 11, marginTop: 4 }}>Gönderilemedi</Text>
+          )}
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 4, marginTop: 2 }}>
             <Text style={{ color: (mine ? theme.colors.bubbleMineText : theme.colors.textMuted), fontSize: 10, opacity: 0.7 }}>
               {new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
@@ -312,6 +433,9 @@ export default function ChatScreen() {
 
       {/* Composer */}
       <View style={{ flexDirection: 'row', alignItems: 'flex-end', paddingHorizontal: theme.spacing(3), paddingVertical: theme.spacing(2), borderTopWidth: 1, borderTopColor: theme.colors.border, backgroundColor: theme.colors.surface }}>
+        <TouchableOpacity onPress={() => setAttachOpen(true)} style={{ width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' }}>
+          <Ionicons name="add" size={26} color={theme.colors.accent} />
+        </TouchableOpacity>
         <TextInput
           value={text}
           onChangeText={(v) => { onChangeText(v); void saveDraft(v); }}
@@ -328,6 +452,31 @@ export default function ChatScreen() {
           <Ionicons name="send" size={20} color={text.trim() ? theme.colors.accentContrast : theme.colors.textMuted} />
         </TouchableOpacity>
       </View>
+
+      {/* Attach sheet */}
+      <Modal visible={attachOpen} transparent animationType="fade" onRequestClose={() => setAttachOpen(false)}>
+        <Pressable style={{ flex: 1, backgroundColor: theme.colors.overlay, justifyContent: 'flex-end' }} onPress={() => setAttachOpen(false)}>
+          <Pressable style={{ backgroundColor: theme.colors.surface, borderTopLeftRadius: theme.radii.xl, borderTopRightRadius: theme.radii.xl, padding: theme.spacing(4) }} onPress={() => {}}>
+            <AttachRow icon="images-outline" label="Galeri" onPress={() => void pickMedia('library')} />
+            <AttachRow icon="camera-outline" label="Kamera" onPress={() => void pickMedia('camera')} />
+            <AttachRow icon="document-outline" label="Dosya" onPress={() => void pickMedia('file')} />
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* Fullscreen media viewer */}
+      <Modal visible={!!viewer} transparent animationType="fade" onRequestClose={() => setViewer(null)}>
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.95)', justifyContent: 'center', alignItems: 'center' }} onPress={() => setViewer(null)}>
+          {viewer?.type === 'image' ? (
+            <Image source={{ uri: viewer.url }} style={{ width: '95%', height: '80%' }} resizeMode="contain" />
+          ) : (
+            <View style={{ alignItems: 'center' }}>
+              <Ionicons name="videocam" size={64} color="#fff" />
+              <Text style={{ color: '#B8A888', marginTop: 12 }}>Video oynatıcı yakında</Text>
+            </View>
+          )}
+        </Pressable>
+      </Modal>
 
       {/* Message action sheet */}
       <Modal visible={!!selected} transparent animationType="fade" onRequestClose={() => setSelected(null)}>
@@ -364,6 +513,92 @@ function ActionRow({ icon, label, onPress, danger }: { icon: string; label: stri
     <TouchableOpacity onPress={onPress} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: theme.spacing(3) }}>
       <Ionicons name={icon as any} size={22} color={danger ? theme.colors.danger : theme.colors.text} style={{ width: 32 }} />
       <Text style={{ color: danger ? theme.colors.danger : theme.colors.text, fontSize: theme.typography.sizes.md }}>{label}</Text>
+    </TouchableOpacity>
+  );
+}
+
+function AttachRow({ icon, label, onPress }: { icon: string; label: string; onPress: () => void }) {
+  const theme = useTheme();
+  return (
+    <TouchableOpacity onPress={onPress} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: theme.spacing(4) }}>
+      <Ionicons name={icon as any} size={26} color={theme.colors.accent} style={{ width: 36 }} />
+      <Text style={{ color: theme.colors.text, fontSize: theme.typography.sizes.md }}>{label}</Text>
+    </TouchableOpacity>
+  );
+}
+
+// signed-URL cache (5 min) so bubbles don't refetch on every render
+const urlCache = new Map<string, { url: string; exp: number }>();
+async function signedUrl(key: string): Promise<string | null> {
+  const hit = urlCache.get(key);
+  if (hit && hit.exp > Date.now()) return hit.url;
+  const { data } = await supabase.functions.invoke('media-upload-url', { body: { action: 'download', path: key } });
+  if (data?.url) {
+    urlCache.set(key, { url: data.url, exp: Date.now() + 4 * 60 * 1000 });
+    return data.url;
+  }
+  return null;
+}
+
+function useMediaUrl(key?: string) {
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => {
+    if (!key) return;
+    let alive = true;
+    void signedUrl(key).then((u) => { if (alive) setUrl(u); });
+    return () => { alive = false; };
+  }, [key]);
+  return url;
+}
+
+function MediaImage({ message, mine, onPress }: { message: Msg; mine: boolean; onPress: () => void }) {
+  const theme = useTheme();
+  const url = useMediaUrl(message.metadata?.r2_key);
+  if (message.metadata?.uploading || !url) {
+    return (
+      <View style={{ width: 200, height: 140, borderRadius: 10, backgroundColor: 'rgba(0,0,0,0.15)', alignItems: 'center', justifyContent: 'center' }}>
+        <ActivityIndicator color={mine ? theme.colors.bubbleMineText : theme.colors.accent} />
+      </View>
+    );
+  }
+  return (
+    <TouchableOpacity onPress={onPress}>
+      <Image source={{ uri: url }} style={{ width: 220, height: 160, borderRadius: 10 }} resizeMode="cover" />
+    </TouchableOpacity>
+  );
+}
+
+function MediaVideo({ message, mine, onPress }: { message: Msg; mine: boolean; onPress: () => void }) {
+  const theme = useTheme();
+  const url = useMediaUrl(message.metadata?.r2_key);
+  const uploading = message.metadata?.uploading;
+  return (
+    <TouchableOpacity onPress={onPress} style={{ width: 220, height: 140, borderRadius: 10, backgroundColor: '#000', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+      {url && !uploading ? (
+        <>
+          <Ionicons name="play-circle" size={44} color="#fff" />
+          {!!message.metadata?.duration_ms && (
+            <Text style={{ color: '#fff', fontSize: 11, position: 'absolute', bottom: 6, right: 8 }}>{Math.round(message.metadata.duration_ms / 1000)}s</Text>
+          )}
+        </>
+      ) : (
+        <ActivityIndicator color={mine ? theme.colors.bubbleMineText : theme.colors.accent} />
+      )}
+    </TouchableOpacity>
+  );
+}
+
+function FileBubble({ message, mine, onPress }: { message: Msg; mine: boolean; onPress: () => void }) {
+  const theme = useTheme();
+  return (
+    <TouchableOpacity onPress={onPress} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, minWidth: 180 }}>
+      <View style={{ width: 40, height: 40, borderRadius: 8, backgroundColor: 'rgba(0,0,0,0.15)', alignItems: 'center', justifyContent: 'center' }}>
+        <Ionicons name="document" size={22} color={mine ? theme.colors.bubbleMineText : theme.colors.accent} />
+      </View>
+      <View style={{ flex: 1 }}>
+        <Text style={{ color: mine ? theme.colors.bubbleMineText : theme.colors.text, fontSize: 13, fontWeight: '600' }} numberOfLines={1}>{message.metadata?.name ?? 'Dosya'}</Text>
+        {!!message.metadata?.size_bytes && <Text style={{ color: mine ? theme.colors.bubbleMineText : theme.colors.textMuted, fontSize: 11 }}>{(message.metadata.size_bytes / 1024 / 1024).toFixed(1)} MB</Text>}
+      </View>
     </TouchableOpacity>
   );
 }

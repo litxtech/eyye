@@ -3,6 +3,7 @@ import { View, Text, TouchableOpacity, KeyboardAvoidingView, Platform, ScrollVie
 import { useTranslation } from 'react-i18next';
 import { Link, router } from 'expo-router';
 import { Screen, Button, Input } from '../../components/ui';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useTheme } from '../../theme/ThemeContext';
 import { signUp, checkUsernameAvailable, isValidUsername } from '../../lib/auth';
 import { supabase } from '../../lib/supabase';
@@ -110,11 +111,25 @@ export default function RegisterScreen() {
   return (
     <Screen>
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <ScrollView contentContainerStyle={{ padding: theme.spacing(5), paddingTop: theme.spacing(10) }} keyboardShouldPersistTaps="handled">
-          <Text style={{ color: theme.colors.text, fontSize: theme.typography.sizes.xl, fontWeight: '800', marginBottom: theme.spacing(5) }}>
-            {t('auth.registerTitle')}
-          </Text>
+        <ScrollView contentContainerStyle={{ padding: theme.spacing(5), paddingTop: theme.spacing(8) }} keyboardShouldPersistTaps="handled">
+          <View style={{ alignItems: 'center', marginBottom: theme.spacing(6) }}>
+            <LinearGradient
+              colors={[theme.colors.accent, theme.colors.accentContrast]}
+              start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+              style={{ width: 64, height: 64, borderRadius: 18, alignItems: 'center', justifyContent: 'center', marginBottom: theme.spacing(3), ...theme.effects.cardShadow }}
+            >
+              <Text style={{ color: '#fff', fontSize: 30, fontWeight: '900' }}>e</Text>
+            </LinearGradient>
+            <Text style={{ color: theme.colors.text, fontSize: theme.typography.sizes.xl, fontWeight: '800' }}>{t('auth.registerTitle')}</Text>
+            {/* step indicator */}
+            <View style={{ flexDirection: 'row', gap: 8, marginTop: theme.spacing(4) }}>
+              {[0, 1, 2].map((i) => (
+                <View key={i} style={{ width: i === step ? 28 : 8, height: 8, borderRadius: 4, backgroundColor: i <= step ? theme.colors.accent : theme.colors.border }} />
+              ))}
+            </View>
+          </View>
 
+          <View style={{ backgroundColor: theme.colors.surface, borderRadius: theme.radii.xl, borderWidth: 1, borderColor: theme.colors.border, padding: theme.spacing(4), ...theme.effects.cardShadow }}>
           {step === 0 && (
             <>
               <View style={{ flexDirection: 'row', gap: theme.spacing(3) }}>
@@ -172,6 +187,8 @@ export default function RegisterScreen() {
               <CheckRow checked={marketing} onToggle={() => setMarketing(!marketing)} label={t('auth.marketingOptIn')} />
             </View>
           )}
+
+          </View>
 
           {!!error && <Text style={{ color: theme.colors.danger, marginVertical: theme.spacing(2) }}>{error}</Text>}
 
