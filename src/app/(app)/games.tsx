@@ -1,13 +1,14 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, FlatList } from 'react-native';
 import { useTranslation } from 'react-i18next';
+import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Screen } from '../../components/ui';
 import { useTheme } from '../../theme/ThemeContext';
 
 const GAMES = [
-  { id: 'truth', icon: 'heart', title: 'Doğruluk veya Cesaret', desc: 'Klasik içtenlik oyunu' },
-  { id: 'okey', icon: 'albums', title: 'Okey', desc: 'Taşlı klasik' },
+  { id: 'okey', icon: 'albums', title: 'VIP Okey', desc: '4 oyunculu premium masa oyunu', route: '/okey' },
+  { id: 'truth', icon: 'heart', title: 'Doğruluk / Cesaret', desc: 'Çark çevir, kanıtla', route: '/truth-dare' },
 ];
 
 export default function GamesScreen() {
@@ -24,6 +25,7 @@ export default function GamesScreen() {
         contentContainerStyle={{ padding: theme.spacing(4), gap: theme.spacing(4) }}
         renderItem={({ item }) => (
           <TouchableOpacity
+            onPress={() => router.push(item.route as any)}
             style={{
               backgroundColor: theme.colors.card, borderRadius: theme.radii.lg, padding: theme.spacing(5),
               borderWidth: 1, borderColor: theme.colors.border, ...theme.effects.cardShadow,

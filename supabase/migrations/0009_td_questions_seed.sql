@@ -1,0 +1,27 @@
+-- Seed truth/dare question bank (4 languages per row). Draft content — admin-editable.
+insert into public.td_questions (kind, category, body, risk) values
+('truth','general','{"tr":"Kendini en son ne zaman utandırdın?","en":"When did you last embarrass yourself?","es":"¿Cuándo te avergonzaste por última vez?","ar":"متى أحرجت نفسك آخر مرة؟"}',0),
+('truth','general','{"tr":"Hiç söylemediğin bir yalanın ne?","en":"What is a lie you have never told?","es":"¿Cuál es una mentira que nunca has contado?","ar":"ما هي كذبة لم تقلها قط؟"}',0),
+('truth','friends','{"tr":"En garip rüyanı anlat.","en":"Tell your weirdest dream.","es":"Cuenta tu sueño más extraño.","ar":"احكِ عن أغرب أحلامك."}',0),
+('truth','friends','{"tr":"Şu ana kadar attığın en büyük risk neydi?","en":"What was the biggest risk you have ever taken?","es":"¿Cuál fue el mayor riesgo que has corrido?","ar":"ما أكبر مخاطرة خضتها؟"}',0),
+('truth','general','{"tr":"En çok pişman olduğun karar ne?","en":"What decision do you regret most?","es":"¿Qué decisión lamentas más?","ar":"ما القرار الذي تندم عليه أكثر؟"}',0),
+('truth','friends','{"tr":"Birisi hakkında ilk izlenimini ilk 10 saniyede nasıl kuruyorsun?","en":"How do you judge someone in the first 10 seconds?","es":"¿Cómo juzgas a alguien en los primeros 10 segundos?","ar":"كيف تحكم على شخص ما في أول 10 ثوانٍ؟"}',0),
+('truth','couples','{"tr":"Partnerinle ilgili en sevdiğin özellik ne?","en":"What do you love most about your partner?","es":"¿Qué es lo que más amas de tu pareja?","ar":"ما الذي تحبه أكثر في شريكك؟"}',1),
+('truth','flirt','{"tr":"Son flörtünde kalbin neden çarptı?","en":"Why did your heart race on your last date?","es":"¿Por qué latió tu corazón en tu última cita?","ar":"لماذا خفق قلبك في موعدك الأخير؟"}',1),
+('truth','arena','{"tr":"Şu ana kadar hiç kimseye söylemediğin en büyük sırın ne?","en":"What is your biggest secret you have never told anyone?","es":"¿Cuál es tu mayor secreto que nunca le has contado a nadie?","ar":"ما أكبر سر لم تخبر به أحداً قط؟"}',1),
+('truth','general','{"tr":"Çocukken en çok korktuğun şey neydi?","en":"What scared you most as a child?","es":"¿Qué te daba más miedo de niño?","ar":"ما الذي كان يخيفك أكثر وأنت طفل؟"}',0),
+('truth','friends','{"tr":"Arkadaş grubunda sana en çok neyi yakıştırırlar?","en":"What do your friends say is your biggest trait?","es":"¿Qué dicen tus amigos que es tu mayor rasgo?","ar":"ما الذي يقول أصدقاؤك إنه سمة مميزة لديك؟"}',0),
+('truth','global','{"tr":"Hayatında en çok keyif aldığın an neydi?","en":"What was the most enjoyable moment of your life?","es":"¿Cuál fue el momento más placentero de tu vida?","ar":"ما أكثر لحظة استمتعت بها في حياتك؟"}',0),
+('dare','general','{"tr":"Herkesin önünde 30 saniye en sevdiğin şarkıyı söyle.","en":"Sing your favorite song for 30 seconds in front of everyone.","es":"Canta tu canción favorita 30 segundos frente a todos.","ar":"غنِّ أغنيتك المفضلة لمدة 30 ثانية أمام الجميع."}',0),
+('dare','friends','{"tr":"Telefonundaki son fotoğrafı göster ve hikayesini anlat.","en":"Show the last photo on your phone and tell its story.","es":"Muestra la última foto de tu teléfono y cuenta su historia.","ar":"أرِ آخر صورة في هاتفك واحكِ قصتها."}',0),
+('dare','general','{"tr":"Herkese komik bir sesle selam ver.","en":"Greet everyone with a funny voice.","es":"Saluda a todos con una voz graciosa.","ar":"رحّب بالجميع بصوت مضحك."}',0),
+('dare','friends','{"tr":"Sıradaki oyuncuya bir iltifat et.","en":"Give a compliment to the next player.","es":"Haz un cumplido al siguiente jugador.","ar":"وجّه مجاملة للاعب التالي."}',0),
+('dare','general','{"tr":"30 saniye boyunca tek ayak üstünde dur.","en":"Stand on one foot for 30 seconds.","es":"Quédate en un pie durante 30 segundos.","ar":"قف على قدم واحدة لمدة 30 ثانية."}',0),
+('dare','friends','{"tr":"En son yediğin yemeği tarif et, kimse sormadan.","en":"Describe your last meal without being asked.","es":"Describe tu última comida sin que te pregunten.","ar":"صف آخر وجبة أكلتها دون أن يُطلب منك."}',0),
+('dare','couples','{"tr":"Partnerinle 1 dakikalık dans et.","en":"Dance with your partner for 1 minute.","es":"Baila con tu pareja durante 1 minuto.","ar":"ارقص مع شريكك لمدة دقيقة واحدة."}',1),
+('dare','flirt','{"tr":"Grupça bir selfie çek ve hepsiyle paylaş.","en":"Take a group selfie and share it with everyone.","es":"Toma una selfie grupal y compártela con todos.","ar":"التقط صورة سيلفي جماعية وشاركها مع الجميع."}',1),
+('dare','arena','{"tr":"Şu an elindeki bir eşyanın hikayesini 1 dakika anlat.","en":"Tell the story of an item you are holding for 1 minute.","es":"Cuenta la historia de un objeto que tengas durante 1 minuto.","ar":"احكِ قصة غرض تمسكه الآن لمدة دقيقة."}',1),
+('dare','general','{"tr":"İlk gördüğün nesnenin adını 10 kez hızlıca söyle.","en":"Say the name of the first object you see 10 times fast.","es":"Di el nombre del primer objeto que veas 10 veces rápido.","ar":"قل اسم أول شيء تراه 10 مرات بسرعة."}',0),
+('dare','friends','{"tr":"Kendini en komik pozda 5 saniye tut.","en":"Hold the funniest pose for 5 seconds.","es":"Mantén la pose más graciosa durante 5 segundos.","ar":"ثبّت أضيق وضعية لمدة 5 ثوانٍ."}',0),
+('dare','global','{"tr":"Grupça birbirinize sesli mesaj gönderin ve en komiğini seçin.","en":"Send each other voice messages and pick the funniest.","es":"Envíense mensajes de voz y elijan el más gracioso.","ar":"أرسلوا رسائل صوتية لبعضكم واختروا الأضحك."}',0)
+on conflict do nothing;
