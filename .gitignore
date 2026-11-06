@@ -4,3 +4,4 @@ dist/
 .expo/
 firebase-adminsdk.json
 eas-ios-build.cmd
+blog*.txt bv*.json
