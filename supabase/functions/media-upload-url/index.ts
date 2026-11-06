@@ -57,6 +57,9 @@ Deno.serve(async (req) => {
 
   const auth = req.headers.get('Authorization');
   if (!auth?.startsWith('Bearer ')) return json({ error: 'unauthorized' }, 401);
+  const svc = admin;
+  const { data: { user } } = await svc.auth.getUser(auth.slice(7));
+  if (!user) return json({ error: 'unauthorized' }, 401);
   const cfg = await r2Config();
   if (!cfg) return json({ error: 'r2 not configured' }, 503);
 
@@ -67,6 +70,18 @@ Deno.serve(async (req) => {
   if (!validPath) return json({ error: 'invalid path' }, 400);
 
   // ---- legacy single-shot upload URL ----
+  if (action === 'download') {
+    // view-once truth/dare evidence: only the uploader, or a recipient who
+    // consumed their view in the last 5 minutes, may get a URL
+    const { data: ev } = await svc.from('td_evidence').select('id, uploader_id').eq('storage_path', path).maybeSingle();
+    if (ev && ev.uploader_id !== user.id) {
+      const { data: rec } = await svc.from('td_evidence_recipients').select('consumed_at')
+        .eq('evidence_id', ev.id).eq('user_id', user.id).maybeSingle();
+      const fresh = rec?.consumed_at && Date.now() - new Date(rec.consumed_at).getTime() < 5 * 60 * 1000;
+      if (!fresh) return json({ error: 'forbidden' }, 403);
+    }
+  }
+
   if (action === 'upload' || action === 'download') {
     const method = action === 'download' ? 'GET' : 'PUT';
     const expires = action === 'upload' ? EXPIRES_SECONDS : 300;

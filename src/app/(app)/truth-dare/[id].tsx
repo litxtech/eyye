@@ -1,10 +1,12 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { View, Text, FlatList, TouchableOpacity, TextInput, Modal, Pressable, ScrollView, Alert, Image } from 'react-native';
+import { View, Text, FlatList, TouchableOpacity, TextInput, Modal, Pressable, ScrollView, Alert, Image, Animated, Easing, Share, useWindowDimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import { useLocalSearchParams, router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
+import * as ScreenCapture from 'expo-screen-capture';
+import { useVideoPlayer, VideoView } from 'expo-video';
 import { Screen, Avatar } from '../../../components/ui';
 import { ProfileCard } from '../../../components/ProfileCard';
 import { useTheme } from '../../../theme/ThemeContext';
@@ -15,24 +17,66 @@ import { gameFx } from '../../../lib/gameFx';
 import { compressImage, isVideoAsset } from '../../../lib/media';
 import { uploadMedia } from '../../../lib/mediaUpload';
 
+const BG = '#0B0614';
+const CARD = 'rgba(40,20,60,0.72)';
+const PINK = '#FF4FA3';
+const PURPLE = '#9B5CFF';
+const GOLD = '#E8C97A';
+const TEXT = '#F3EAFE';
+const MUTED = '#A996C4';
+
+const ERRORS: Record<string, string> = {
+  not_enough_players: 'En az 2 oyuncu gerekli',
+  round_in_progress: 'Önce mevcut tur bitmeli',
+  not_your_turn: 'Sıra sende değil',
+  already_chosen: 'Seçim zaten yapıldı',
+  user_questions_disabled: 'Bu odada kullanıcı soruları kapalı',
+  cannot_ask_self: 'Kendine soru soramazsın',
+  round_closed: 'Bu tura artık soru eklenemez',
+  bad_length: 'Soru 5–300 karakter olmalı',
+  prohibited_content: 'Bu içerik topluluk kurallarına aykırı',
+  already_viewed: 'Bu kanıtı zaten görüntüledin',
+  not_recipient: 'Bu kanıtı görüntüleme yetkin yok',
+  rate_limited: 'Çok fazla davet gönderdin, biraz bekle',
+  forbidden: 'Bu işlem için yetkin yok',
+};
+const friendly = (m?: string) => (m && Object.entries(ERRORS).find(([k]) => m.includes(k))?.[1]) || m || 'Hata';
+
+function questionText(body: any, lang: string): string {
+  if (!body) return '';
+  if (typeof body === 'string') return body;
+  return body.custom ?? body[lang] ?? body.tr ?? body.en ?? Object.values(body).find((v) => typeof v === 'string') ?? '';
+}
+
 export default function TruthDareRoom() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const theme = useTheme();
+  const { width } = useWindowDimensions();
   const params = useLocalSearchParams<{ id: string; room?: string; role?: string }>();
   const roomId = params.id;
   const uid = useAppStore((s) => s.session?.user.id);
   const [data, setData] = useState<any>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [chat, setChat] = useState<any[]>([]);
   const [chatOpen, setChatOpen] = useState(false);
   const [chatText, setChatText] = useState('');
   const [unread, setUnread] = useState(0);
   const [micOn, setMicOn] = useState(true);
+  const [voiceOk, setVoiceOk] = useState(false);
+  const [speaking, setSpeaking] = useState<Set<string>>(new Set());
   const [profileUser, setProfileUser] = useState<string | null>(null);
   const [proofView, setProofView] = useState<{ url: string; kind: string } | null>(null);
   const [friends, setFriends] = useState<any[]>([]);
   const [showInvite, setShowInvite] = useState(false);
   const [uploading, setUploading] = useState(false);
-  const voiceRef = useRef<any>(null);
+  const [busy, setBusy] = useState(false);
+  const [askOpen, setAskOpen] = useState(false);
+  const [askText, setAskText] = useState('');
+  const [proofPick, setProofPick] = useState<{ assetUri: string; asset: any } | null>(null);
+  const [recipients, setRecipients] = useState<Set<string>>(new Set());
+  const bottle = useRef(new Animated.Value(0)).current;
+  const bottleDeg = useRef(0);
+  const lastRoundId = useRef<string | null>(null);
 
   const chatOpenRef = useRef(chatOpen);
   chatOpenRef.current = chatOpen;
@@ -46,9 +90,10 @@ export default function TruthDareRoom() {
     if (loadingRef.current) { reloadQueued.current = true; return; }
     loadingRef.current = true;
     try {
-      const { data, error } = await supabase.rpc('td_state', { p_room: roomId });
-      if (error) { Alert.alert('Error', error.message); return; }
-      setData(data);
+      const { data: st, error } = await supabase.rpc('td_state', { p_room: roomId });
+      if (error) { setLoadError(error.message); return; }
+      setLoadError(null);
+      setData(st);
     } finally {
       loadingRef.current = false;
       if (reloadQueued.current) { reloadQueued.current = false; void load(); }
@@ -57,18 +102,19 @@ export default function TruthDareRoom() {
 
   const scheduleLoad = useCallback(() => {
     if (loadTimer.current) clearTimeout(loadTimer.current);
-    loadTimer.current = setTimeout(() => { void load(); }, 300);
+    loadTimer.current = setTimeout(() => { void load(); }, 250);
   }, [load]);
 
   const gameId = data?.game?.id ?? '00000000-0000-0000-0000-000000000000';
   useEffect(() => {
     void load();
-    const ch = supabase.channel(`td-${roomId}`)
+    const ch = supabase.channel(`td-${roomId}-${gameId}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'td_rooms', filter: `id=eq.${roomId}` }, scheduleLoad)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'td_room_members', filter: `room_id=eq.${roomId}` }, scheduleLoad)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'td_games', filter: `room_id=eq.${roomId}` }, scheduleLoad)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'td_rounds', filter: `game_id=eq.${gameId}` }, scheduleLoad)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'td_chat', filter: `room_id=eq.${roomId}` }, (p: any) => {
+        if (p.new.game_id && p.new.game_id !== gameId) return;
         setChat((c) => [...c.slice(-50), p.new]);
         if (!chatOpenRef.current && p.new.user_id !== uidRef.current) setUnread((u) => u + 1);
       })
@@ -79,48 +125,104 @@ export default function TruthDareRoom() {
     };
   }, [roomId, load, scheduleLoad, gameId]);
 
-  // voice when room allows it
+  // chat is scoped to the current game session
   useEffect(() => {
-    if (data?.room?.voice_enabled && data?.room?.status !== 'closed' && !voiceRef.current) {
-      const lk = data.room.livekit_room;
-      if (lk) void connectVoice(lk, 'truth_dare', () => {}).then((v) => { voiceRef.current = v; }).catch(() => {});
+    let q = supabase.from('td_chat').select('*').eq('room_id', roomId).order('created_at', { ascending: false }).limit(50);
+    q = data?.game?.id ? q.eq('game_id', data.game.id) : q.is('game_id', null);
+    void q.then(({ data: msgs }) => setChat((msgs ?? []).reverse()));
+  }, [roomId, data?.game?.id]);
+
+  const lk = data?.room?.voice_enabled && data?.room?.status !== 'closed' ? data?.room?.livekit_room : null;
+  useEffect(() => {
+    if (!lk) return;
+    let cancelled = false;
+    void connectVoice(lk, 'truth_dare', (ids) => setSpeaking(new Set(ids)))
+      .then(() => { if (!cancelled) setVoiceOk(true); })
+      .catch(() => { if (!cancelled) setVoiceOk(false); });
+    return () => { cancelled = true; void disconnectVoice(); setVoiceOk(false); };
+  }, [lk]);
+
+  const members: any[] = data?.members ?? [];
+  const players = members.filter((m) => !m.is_spectator);
+  const round = data?.current_round;
+
+  // spin the bottle toward the player the server picked
+  useEffect(() => {
+    if (!round?.id || round.id === lastRoundId.current) return;
+    const first = lastRoundId.current === null;
+    lastRoundId.current = round.id;
+    const idx = Math.max(0, players.findIndex((m) => m.user_id === round.turn_user_id));
+    const target = (360 / Math.max(players.length, 1)) * idx;
+    if (first || round.status !== 'choosing') {
+      bottleDeg.current = target;
+      bottle.setValue(target);
+      return;
     }
-    return () => { /* keep voice until leave */ };
-  }, [data?.room?.voice_enabled, data?.room?.livekit_room, data?.room?.status]);
-
-  useEffect(() => {
-    void supabase.from('td_chat').select('*').eq('room_id', roomId).order('created_at', { ascending: false }).limit(50)
-      .then(({ data: msgs }) => setChat((msgs ?? []).reverse()));
-  }, [roomId]);
-
-  async function spin() {
+    const next = bottleDeg.current - (bottleDeg.current % 360) + 360 * 4 + target;
+    bottleDeg.current = next;
     void gameFx.spin();
-    const { data: res, error } = await supabase.rpc('td_spin', { p_room: roomId });
-    if (error) { Alert.alert(t('common.error'), error.message); void gameFx.error(); return; }
-    void load();
-    if (res?.question) Alert.alert(res.kind === 'truth' ? 'DOĞRULUK' : 'CESARET', String(res.question));
+    Animated.timing(bottle, { toValue: next, duration: 2600, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [round?.id]);
+
+  // block screenshots while a view-once proof is open (best effort)
+  useEffect(() => {
+    if (!proofView) return;
+    void ScreenCapture.preventScreenCaptureAsync('td-proof').catch(() => {});
+    return () => { void ScreenCapture.allowScreenCaptureAsync('td-proof').catch(() => {}); };
+  }, [proofView]);
+
+  async function rpc(name: string, args: any) {
+    if (busy) return null;
+    setBusy(true);
+    try {
+      const { data: res, error } = await supabase.rpc(name, args);
+      if (error) { void gameFx.error(); Alert.alert(t('common.error'), friendly(error.message)); return null; }
+      return res ?? true;
+    } finally {
+      setBusy(false);
+      void load();
+    }
   }
 
-  async function resolve(status: 'answered' | 'passed' | 'completed') {
-    const round = data?.current_round;
-    if (!round?.id) return;
-    const { error } = await supabase.rpc('td_resolve_round', { p_round: round.id, p_status: status });
-    if (error) Alert.alert(t('common.error'), error.message);
-    void load();
+  const spin = () => rpc('td_spin', { p_room: roomId });
+  const choose = (kind: 'truth' | 'dare') => rpc('td_choose', { p_round: round?.id, p_kind: kind });
+  const resolve = (status: 'answered' | 'passed' | 'completed') => rpc('td_resolve_round', { p_round: round?.id, p_status: status });
+
+  async function askCustom() {
+    const ok = await rpc('td_ask_custom', { p_round: round?.id, p_body: askText });
+    if (ok) { setAskText(''); setAskOpen(false); }
   }
 
   async function sendChat() {
     const body = chatText.trim();
     if (!body) return;
     setChatText('');
-    const { error } = await supabase.rpc('td_chat_send', { p_room: roomId, p_body: body });
-    if (error) Alert.alert(t('common.error'), error.message);
+    const { error } = await supabase.rpc('td_chat_send', { p_room: roomId, p_body: body, p_game: data?.game?.id ?? null });
+    if (error) Alert.alert(t('common.error'), friendly(error.message));
   }
 
-  async function uploadProof(roundId: string) {
-    const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images', 'videos'], quality: 0.9, videoMaxDuration: 30 });
+  async function pickProof(source: 'camera' | 'library') {
+    const opts: ImagePicker.ImagePickerOptions = { mediaTypes: ['images', 'videos'], quality: 0.85, videoMaxDuration: 30 };
+    if (source === 'camera') {
+      const perm = await ImagePicker.requestCameraPermissionsAsync();
+      if (!perm.granted) { Alert.alert('Kamera izni gerekli'); return; }
+    }
+    const res = source === 'camera' ? await ImagePicker.launchCameraAsync(opts) : await ImagePicker.launchImageLibraryAsync(opts);
     if (res.canceled || !res.assets?.[0]) return;
     const asset = res.assets[0];
+    if (isVideoAsset(asset) && (asset.duration ?? 0) > 31000) {
+      Alert.alert('Video en fazla 30 saniye olabilir'); return;
+    }
+    // default recipient: whoever asked this round
+    setRecipients(new Set(round?.asked_by && round.asked_by !== uid ? [round.asked_by] : []));
+    setProofPick({ assetUri: asset.uri, asset });
+  }
+
+  async function sendProof() {
+    if (!proofPick || !round?.id) return;
+    if (recipients.size === 0) { Alert.alert('Alıcı seç', 'Kanıtı görecek en az bir oyuncu seç.'); return; }
+    const asset = proofPick.asset;
     const isVideo = isVideoAsset(asset);
     setUploading(true);
     try {
@@ -130,224 +232,315 @@ export default function TruthDareRoom() {
         size: asset.fileSize ?? 0, kind: isVideo ? 'video' : 'image', context: 'td_proof',
         width: asset.width, height: asset.height,
       });
-      // recipients: all other non-spectator members
-      const recipients = (data?.members ?? [])
-        .filter((m: any) => !m.is_spectator && m.user_id !== uid)
-        .map((m: any) => m.user_id);
       const { error } = await supabase.rpc('td_create_evidence', {
-        p_round: roundId, p_storage_path: result.r2Key,
-        p_media_type: isVideo ? 'video' : 'image', p_mime: media.mime,
-        p_size: asset.fileSize ?? 0, p_duration: Math.round((asset.duration ?? 0) * 1000),
-        p_recipients: recipients,
+        p_round: round.id, p_storage_path: result.r2Key,
+        p_media_type: isVideo ? 'video' : 'photo', p_mime: media.mime,
+        p_size: asset.fileSize ?? 0, p_duration: Math.round(asset.duration ?? 0),
+        p_recipients: [...recipients],
       });
-      if (error) Alert.alert(t('common.error'), error.message);
-      else void resolve('completed');
+      if (error) { Alert.alert(t('common.error'), friendly(error.message)); return; }
+      setProofPick(null);
+      await resolve('completed');
     } catch (e: any) {
       Alert.alert('Yükleme hatası', e?.message ?? '');
     } finally {
       setUploading(false);
-      void load();
     }
   }
 
   async function viewProof(evidenceId: string) {
-    const { data: res, error } = await supabase.rpc('td_view_evidence', { p_evidence: evidenceId });
-    if (error) {
-      Alert.alert('Kanıt', error.message.includes('already_viewed') ? 'Bu kanıtı zaten gördün' : error.message.includes('not_recipient') ? 'Bu kanıtı görüntüleme yetkin yok' : error.message);
-      return;
-    }
-    if (!res?.storage_path) return;
-    // one-view consumed server-side; now fetch signed URL
-    const { data: up } = await supabase.functions.invoke('media-upload-url', {
-      body: { action: 'download', path: res.storage_path },
-    });
-    if (up?.url) setProofView({ url: up.url, kind: res.media_type });
+    Alert.alert('Tek görüntülemelik kanıt', 'Bu içerik yalnızca bir kez açılabilir. Kapattıktan sonra tekrar görüntülenemez. Ekran kaydı veya başka bir cihazla çekim tamamen engellenemez.', [
+      { text: 'Vazgeç', style: 'cancel' },
+      { text: 'Aç', onPress: async () => {
+        const { data: res, error } = await supabase.rpc('td_view_evidence', { p_evidence: evidenceId });
+        if (error) { Alert.alert('Kanıt', friendly(error.message)); void load(); return; }
+        if (!res?.storage_path) return;
+        const { data: up } = await supabase.functions.invoke('media-upload-url', { body: { action: 'download', path: res.storage_path } });
+        if (up?.url) setProofView({ url: up.url, kind: res.media_type });
+        else Alert.alert('Kanıt', 'Medya açılamadı');
+        void load();
+      }},
+    ]);
   }
 
   async function invite() {
     const { data: fr } = await supabase.from('user_follows').select('following_id').eq('follower_id', uid!);
-    const { data: profs } = await supabase.from('profiles').select('id, username, display_name, avatar_url').in('id', (fr ?? []).map((f: any) => f.following_id));
+    const ids = (fr ?? []).map((f: any) => f.following_id);
+    const { data: profs } = ids.length
+      ? await supabase.from('profiles').select('id, username, display_name, avatar_url').in('id', ids)
+      : { data: [] as any[] };
     setFriends(profs ?? []);
     setShowInvite(true);
   }
 
   async function doInvite(to: string) {
-    const { error } = await supabase.from('td_room_invites').insert({ room_id: roomId, from_user: uid, to_user: to });
-    if (!error) {
-      try {
-        await supabase.rpc('notify_user', {
-          p_user: to, p_type: 'game_invite', p_title: 'Doğruluk/Cesaret daveti',
-          p_body: `${data?.room?.name ?? 'Oda'} odasına davet edildin`,
-          p_data: { room_id: roomId, kind: 'td' }, p_actor: uid,
-        });
-      } catch { /* notify is best-effort */ }
-    }
+    const { error } = await supabase.rpc('td_invite', { p_room: roomId, p_to: to });
     setShowInvite(false);
+    Alert.alert(error ? t('common.error') : 'Davet gönderildi', error ? friendly(error.message) : undefined);
   }
 
-  async function leave() {
-    await supabase.rpc('td_leave_room', { p_room: roomId });
-    await disconnectVoice();
-    router.back();
+  function leave() {
+    Alert.alert('Odadan ayrıl', 'Odadan ayrılmak istiyor musun?', [
+      { text: 'Vazgeç', style: 'cancel' },
+      { text: 'Ayrıl', style: 'destructive', onPress: async () => {
+        await supabase.rpc('td_leave_room', { p_room: roomId });
+        await disconnectVoice();
+        if (router.canGoBack()) router.back(); else router.replace('/games');
+      }},
+    ]);
   }
 
-  if (!data) return <Screen />;
-  const { room, members = [], my_role, current_round } = data;
-  const isHost = my_role === 'host' || members?.find((m: any) => m.user_id === uid)?.role === 'host';
-  const isSpectator = members?.find((m: any) => m.user_id === uid)?.is_spectator;
-  const myMember = members?.find((m: any) => m.user_id === uid);
-  const turnUser = current_round?.turn_user_id;
+  const goBack = () => (router.canGoBack() ? router.back() : router.replace('/games'));
+
+  if (!data) {
+    return (
+      <Screen style={{ backgroundColor: BG }}>
+        <SafeAreaView edges={['top']} style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+          {loadError ? (
+            <>
+              <Ionicons name="alert-circle-outline" size={42} color={PINK} />
+              <Text style={{ color: TEXT, marginTop: 12, textAlign: 'center' }}>Oda açılamadı: {friendly(loadError)}</Text>
+              <TouchableOpacity onPress={goBack} style={{ marginTop: 18, paddingHorizontal: 22, paddingVertical: 10, borderRadius: 12, backgroundColor: PINK }}>
+                <Text style={{ color: '#fff', fontWeight: '700' }}>Geri dön</Text>
+              </TouchableOpacity>
+            </>
+          ) : <Text style={{ color: MUTED }}>Oda yükleniyor…</Text>}
+        </SafeAreaView>
+      </Screen>
+    );
+  }
+
+  const room = data.room;
+  const me = members.find((m) => m.user_id === uid);
+  const isSpectator = !!me?.is_spectator;
+  const turnUser = round?.turn_user_id;
   const isMyTurn = turnUser === uid && !isSpectator;
-  const roundOpen = current_round && ['pending', 'active', 'choosing'].includes(current_round.status ?? 'pending') && !current_round.evidence_id;
-  const senderNames: Record<string, string> = {};
-  for (const m of members) if (m.profile?.display_name) senderNames[m.user_id] = m.profile.display_name;
+  const open = round && ['choosing', 'pending'].includes(round.status);
+  const names: Record<string, string> = {};
+  for (const m of members) names[m.user_id] = m.user_id === uid ? 'Sen' : m.profile?.display_name ?? m.profile?.username ?? 'Oyuncu';
+  const qText = round ? (round.custom_text || questionText(round.question, i18n.language)) : '';
+  const circle = Math.min(width - 40, 320);
+  const radius = circle / 2 - 34;
+  const spectators = members.filter((m) => m.is_spectator).length;
+  const bottleRotate = bottle.interpolate({ inputRange: [0, 360], outputRange: ['0deg', '360deg'] });
 
   return (
-    <Screen>
-      <SafeAreaView edges={['top']} style={{ backgroundColor: theme.colors.background }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: theme.spacing(3), paddingBottom: theme.spacing(2) }}>
-          <TouchableOpacity onPress={() => router.back()} style={{ padding: theme.spacing(2) }}><Ionicons name="close" size={26} color={theme.colors.text} /></TouchableOpacity>
-          <Text style={{ flex: 1, color: theme.colors.text, fontWeight: '800', fontSize: theme.typography.sizes.md, textAlign: 'center' }} numberOfLines={1}>{room.name} · {room.category}</Text>
-          {room.voice_enabled && (
-            <TouchableOpacity onPress={() => { setMicOn(!micOn); void setMic(!micOn); }} style={{ padding: theme.spacing(2) }}>
-              <Ionicons name={micOn ? 'mic' : 'mic-off'} size={22} color={micOn ? theme.colors.online : theme.colors.danger} />
+    <Screen style={{ backgroundColor: BG }}>
+      <SafeAreaView edges={['top']} style={{ backgroundColor: BG }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: theme.spacing(2), paddingBottom: theme.spacing(1) }}>
+          <TouchableOpacity onPress={goBack} style={{ padding: theme.spacing(2) }}><Ionicons name="chevron-back" size={26} color={TEXT} /></TouchableOpacity>
+          <View style={{ flex: 1, alignItems: 'center' }}>
+            <Text style={{ color: TEXT, fontWeight: '800', fontSize: theme.typography.sizes.md }} numberOfLines={1}>{room.name?.startsWith('td-') ? 'Neon Lounge' : room.name}</Text>
+            <Text style={{ color: MUTED, fontSize: 11 }}>{players.length}/{room.capacity} oyuncu{spectators ? ` · 👁 ${spectators}` : ''}{room.is_private ? ' · 🔒' : ''}</Text>
+          </View>
+          {voiceOk && !isSpectator && (
+            <TouchableOpacity onPress={() => { const n = !micOn; setMicOn(n); void setMic(n); }} style={{ padding: theme.spacing(2) }}>
+              <Ionicons name={micOn ? 'mic' : 'mic-off'} size={22} color={micOn ? '#4DD4AC' : PINK} />
             </TouchableOpacity>
           )}
-          <TouchableOpacity onPress={invite} style={{ padding: theme.spacing(2) }}><Ionicons name="person-add" size={22} color={theme.colors.accent} /></TouchableOpacity>
-          <TouchableOpacity onPress={leave} style={{ padding: theme.spacing(2) }}><Ionicons name="exit-outline" size={24} color={theme.colors.danger} /></TouchableOpacity>
+          <TouchableOpacity onPress={() => void Share.share({ message: `EyyE Doğruluk mu Cesaret mi odama gel: eyye://truth-dare/${roomId}\nOda kodu: ${room.livekit_room}` })} style={{ padding: theme.spacing(2) }}>
+            <Ionicons name="share-social-outline" size={22} color={TEXT} />
+          </TouchableOpacity>
+          {!isSpectator && <TouchableOpacity onPress={invite} style={{ padding: theme.spacing(2) }}><Ionicons name="person-add" size={22} color={GOLD} /></TouchableOpacity>}
+          <TouchableOpacity onPress={leave} style={{ padding: theme.spacing(2) }}><Ionicons name="exit-outline" size={22} color={PINK} /></TouchableOpacity>
         </View>
       </SafeAreaView>
 
-      <View style={{ flex: 1, padding: theme.spacing(4) }}>
-        {/* members */}
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: theme.spacing(3), marginBottom: theme.spacing(4) }}>
-          {members.map((m: any) => (
-            <TouchableOpacity key={m.user_id} onPress={() => setProfileUser(m.user_id)} style={{ alignItems: 'center', width: 74 }}>
-              <View style={{ borderRadius: 30, borderWidth: m.user_id === turnUser ? 3 : 1.5, borderColor: m.user_id === turnUser ? theme.colors.accent : theme.colors.border, padding: 2 }}>
-                <Avatar uri={m.profile?.avatar_url} name={m.profile?.display_name ?? '?'} size={46} />
-              </View>
-              <Text style={{ color: theme.colors.textSecondary, fontSize: 10, marginTop: 4 }} numberOfLines={1}>
-                {m.profile?.display_name ?? m.user_id.slice(0, 6)}{m.is_spectator ? ' 👁' : ''}
-              </Text>
-              <View style={{ flexDirection: 'row', gap: 4, marginTop: 2 }}>
-                {m.mic_on && <Ionicons name="mic" size={10} color={theme.colors.online} />}
-                {m.cam_on && <Ionicons name="videocam" size={10} color={theme.colors.online} />}
-                {!m.connected && <Ionicons name="cloud-offline" size={10} color={theme.colors.danger} />}
-              </View>
-            </TouchableOpacity>
-          ))}
-          {Array.from({ length: Math.max(0, (room.capacity ?? 6) - members.filter((m: any) => !m.is_spectator).length) }).map((_, i) => (
-            <View key={`e${i}`} style={{ alignItems: 'center', width: 74 }}>
-              <View style={{ width: 46, height: 46, borderRadius: 23, borderWidth: 1.5, borderStyle: 'dashed', borderColor: theme.colors.border, alignItems: 'center', justifyContent: 'center' }}>
-                <Ionicons name="person-add-outline" size={18} color={theme.colors.textMuted} />
-              </View>
-              <Text style={{ color: theme.colors.textMuted, fontSize: 10, marginTop: 4 }}>Boş</Text>
-            </View>
-          ))}
+      <ScrollView contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 120 }}>
+        {/* players around the bottle */}
+        <View style={{ width: circle, height: circle, alignSelf: 'center', marginVertical: 8 }}>
+          <View style={{ position: 'absolute', left: 30, top: 30, right: 30, bottom: 30, borderRadius: circle, borderWidth: 1, borderColor: PURPLE + '55', backgroundColor: 'rgba(155,92,255,0.06)' }} />
+          {players.map((m, i) => {
+            const a = ((360 / Math.max(players.length, 1)) * i - 90) * (Math.PI / 180);
+            const x = circle / 2 + radius * Math.cos(a) - 30;
+            const y = circle / 2 + radius * Math.sin(a) - 30;
+            const active = m.user_id === turnUser && open;
+            const talk = speaking.has(m.user_id);
+            return (
+              <TouchableOpacity key={m.user_id} onPress={() => setProfileUser(m.user_id)} style={{ position: 'absolute', left: x, top: y, width: 60, alignItems: 'center' }}>
+                <View style={{ borderRadius: 30, padding: 2, borderWidth: active || talk ? 3 : 1.5, borderColor: active ? PINK : talk ? '#4DD4AC' : PURPLE + '88' }}>
+                  <Avatar uri={m.profile?.avatar_url} name={m.profile?.display_name ?? '?'} size={42} />
+                </View>
+                <Text style={{ color: TEXT, fontSize: 10, marginTop: 2 }} numberOfLines={1}>{names[m.user_id]}{m.role === 'host' ? ' ★' : ''}</Text>
+                {!m.connected && <Ionicons name="cloud-offline" size={10} color={PINK} />}
+              </TouchableOpacity>
+            );
+          })}
+          <Animated.View style={{ position: 'absolute', left: circle / 2 - 14, top: circle / 2 - 60, width: 28, height: 120, alignItems: 'center', transform: [{ rotate: bottleRotate }] }}>
+            <View style={{ width: 10, height: 26, borderTopLeftRadius: 4, borderTopRightRadius: 4, backgroundColor: GOLD }} />
+            <View style={{ width: 26, height: 64, borderRadius: 12, backgroundColor: '#2BD4A0', borderWidth: 2, borderColor: '#9BF5D9', opacity: 0.9 }} />
+          </Animated.View>
         </View>
 
         {/* round card */}
-        {current_round ? (
-          <View style={{ backgroundColor: theme.colors.surface, borderRadius: theme.radii.lg, borderWidth: 1.5, borderColor: theme.colors.accent, padding: theme.spacing(4), marginBottom: theme.spacing(4) }}>
-            <Text style={{ color: theme.colors.textMuted, fontSize: 11, marginBottom: 4 }}>
-              Tur {current_round.round_no ?? ''} · Sıra: <Text style={{ color: theme.colors.accent, fontWeight: '700' }}>{senderNames[turnUser] ?? turnUser?.slice(0, 8)}</Text>
-            </Text>
-            <Text style={{ color: current_round.kind === 'truth' ? theme.colors.accent : theme.colors.warning, fontWeight: '800', fontSize: 13, marginBottom: 8 }}>
-              {current_round.kind === 'truth' ? 'DOĞRULUK' : 'CESARET'}
-            </Text>
-            <Text style={{ color: theme.colors.text, fontSize: 16, lineHeight: 24, marginBottom: theme.spacing(3) }}>
-              {current_round.question ?? current_round.custom_text ?? '—'}
-            </Text>
-            {current_round.evidence_id ? (
-              <TouchableOpacity onPress={() => void viewProof(current_round.evidence_id)} style={{ padding: theme.spacing(3), borderRadius: theme.radii.md, backgroundColor: theme.colors.accentSoft, alignItems: 'center' }}>
-                <Ionicons name="eye" size={20} color={theme.colors.accent} />
-                <Text style={{ color: theme.colors.accent, fontSize: 12, fontWeight: '700', marginTop: 4 }}>Kanıtı Görüntüle (tek sefer)</Text>
-              </TouchableOpacity>
-            ) : isMyTurn && roundOpen ? (
-              <View style={{ gap: 10 }}>
-                {room.allow_camera && (
-                  <TouchableOpacity onPress={() => void uploadProof(current_round.id)} disabled={uploading} style={{ padding: theme.spacing(3), borderRadius: theme.radii.md, backgroundColor: theme.colors.accentSoft, alignItems: 'center' }}>
-                    <Ionicons name="camera" size={20} color={theme.colors.accent} />
-                    <Text style={{ color: theme.colors.accent, fontSize: 12, fontWeight: '700', marginTop: 4 }}>{uploading ? 'Yükleniyor...' : 'Kanıt Yükle (foto/video)'}</Text>
+        <View style={{ backgroundColor: CARD, borderRadius: 22, borderWidth: 1, borderColor: PINK + '66', padding: 18 }}>
+          {!round || !open ? (
+            <View style={{ alignItems: 'center' }}>
+              {round && !open && (
+                <Text style={{ color: MUTED, fontSize: 12, marginBottom: 8 }}>
+                  Son tur: {names[round.turn_user_id] ?? 'Oyuncu'} · {round.status === 'passed' ? 'geçti' : round.status === 'completed' ? 'görevi tamamladı' : 'cevapladı'}
+                </Text>
+              )}
+              {round?.evidence_id && round.can_view_evidence && round.turn_user_id !== uid && (
+                <EvidenceButton viewed={!!round.my_evidence_viewed} onPress={() => void viewProof(round.evidence_id)} />
+              )}
+              {!isSpectator ? (
+                <TouchableOpacity disabled={busy || players.filter((m) => m.connected).length < 2} onPress={spin}
+                  style={{ marginTop: 8, paddingHorizontal: 30, paddingVertical: 14, borderRadius: 18, backgroundColor: players.length < 2 ? '#3A2A50' : PINK }}>
+                  <Text style={{ color: '#fff', fontWeight: '900', fontSize: 16 }}>Şişeyi Çevir</Text>
+                </TouchableOpacity>
+              ) : <Text style={{ color: MUTED }}>Yeni tur bekleniyor</Text>}
+              {players.length < 2 && <Text style={{ color: MUTED, fontSize: 12, marginTop: 8 }}>Oyunun başlaması için en az 2 oyuncu gerekli. Arkadaşlarını davet et.</Text>}
+            </View>
+          ) : round.status === 'choosing' ? (
+            <View style={{ alignItems: 'center' }}>
+              <Text style={{ color: TEXT, fontSize: 16, fontWeight: '800' }}>{isMyTurn ? 'Şişe seni gösterdi!' : `Şişe ${names[turnUser]} oyuncusunu gösterdi`}</Text>
+              {isMyTurn ? (
+                <View style={{ flexDirection: 'row', gap: 12, marginTop: 14 }}>
+                  <TouchableOpacity disabled={busy} onPress={() => choose('truth')} style={{ flex: 1, paddingVertical: 16, borderRadius: 16, backgroundColor: PURPLE, alignItems: 'center' }}>
+                    <Text style={{ color: '#fff', fontWeight: '900' }}>DOĞRULUK</Text>
                   </TouchableOpacity>
-                )}
-                <View style={{ flexDirection: 'row', gap: 10 }}>
-                  <TouchableOpacity onPress={() => resolve('answered')} style={{ flex: 1, padding: theme.spacing(3), borderRadius: theme.radii.md, backgroundColor: theme.colors.surfaceAlt, alignItems: 'center' }}>
-                    <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 12 }}>Cevapladım</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity onPress={() => resolve('passed')} style={{ flex: 1, padding: theme.spacing(3), borderRadius: theme.radii.md, backgroundColor: theme.colors.surfaceAlt, alignItems: 'center' }}>
-                    <Text style={{ color: theme.colors.textMuted, fontWeight: '700', fontSize: 12 }}>Pas</Text>
+                  <TouchableOpacity disabled={busy} onPress={() => choose('dare')} style={{ flex: 1, paddingVertical: 16, borderRadius: 16, backgroundColor: PINK, alignItems: 'center' }}>
+                    <Text style={{ color: '#fff', fontWeight: '900' }}>CESARET</Text>
                   </TouchableOpacity>
                 </View>
-              </View>
-            ) : (
-              <Text style={{ color: theme.colors.textMuted, fontSize: 12 }}>Cevap bekleniyor...</Text>
-            )}
-          </View>
-        ) : (
-          <View style={{ alignItems: 'center', marginBottom: theme.spacing(4) }}>
-            {!isSpectator && (
-              <TouchableOpacity onPress={() => { if (myMember) void supabase.rpc('td_set_ready', { p_room: roomId, p_ready: !myMember.is_ready }); }} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: theme.spacing(3) }}>
-                <Ionicons name={myMember?.is_ready ? 'checkmark-circle' : 'ellipse-outline'} size={20} color={myMember?.is_ready ? theme.colors.online : theme.colors.textMuted} />
-                <Text style={{ color: theme.colors.textSecondary, fontSize: 13 }}>{myMember?.is_ready ? 'Hazırsın' : 'Hazır ol'}</Text>
-              </TouchableOpacity>
-            )}
-            <TouchableOpacity onPress={spin} disabled={isSpectator || members.filter((m: any) => !m.is_spectator && m.connected).length < 2} style={{ padding: theme.spacing(5), borderRadius: theme.radii.lg, backgroundColor: theme.colors.accentSoft, alignItems: 'center' }}>
-              <Ionicons name="shuffle" size={32} color={theme.colors.accent} />
-              <Text style={{ color: theme.colors.accent, fontWeight: '800', marginTop: 6 }}>ÇARKI ÇEVİR</Text>
-            </TouchableOpacity>
-          </View>
-        )}
+              ) : <Text style={{ color: MUTED, marginTop: 8 }}>Doğruluk mu cesaret mi seçiyor…</Text>}
+              {isMyTurn && (
+                <TouchableOpacity onPress={() => resolve('passed')} style={{ marginTop: 10 }}>
+                  <Text style={{ color: MUTED, fontWeight: '700' }}>Bu turu geç</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          ) : (
+            <View>
+              <Text style={{ color: round.kind === 'truth' ? PURPLE : PINK, fontWeight: '900', fontSize: 13, letterSpacing: 1 }}>
+                {round.kind === 'truth' ? 'DOĞRULUK' : 'CESARET'} · {names[turnUser]}
+              </Text>
+              {round.custom_text && round.asked_by && <Text style={{ color: MUTED, fontSize: 11, marginTop: 2 }}>Soran: {names[round.asked_by] ?? 'Oyuncu'}</Text>}
+              <Text style={{ color: TEXT, fontSize: 18, lineHeight: 26, marginVertical: 12 }}>{qText || '—'}</Text>
+              {isMyTurn ? (
+                <View style={{ gap: 10 }}>
+                  {round.kind === 'dare' && room.allow_camera && (
+                    <View style={{ flexDirection: 'row', gap: 10 }}>
+                      <TouchableOpacity disabled={uploading} onPress={() => void pickProof('camera')} style={{ flex: 1, padding: 12, borderRadius: 14, backgroundColor: 'rgba(255,79,163,0.18)', alignItems: 'center' }}>
+                        <Ionicons name="camera" size={20} color={PINK} />
+                        <Text style={{ color: PINK, fontSize: 12, fontWeight: '700', marginTop: 2 }}>Çek</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity disabled={uploading} onPress={() => void pickProof('library')} style={{ flex: 1, padding: 12, borderRadius: 14, backgroundColor: 'rgba(255,79,163,0.18)', alignItems: 'center' }}>
+                        <Ionicons name="images" size={20} color={PINK} />
+                        <Text style={{ color: PINK, fontSize: 12, fontWeight: '700', marginTop: 2 }}>Galeriden</Text>
+                      </TouchableOpacity>
+                    </View>
+                  )}
+                  <View style={{ flexDirection: 'row', gap: 10 }}>
+                    <TouchableOpacity disabled={busy} onPress={() => resolve(round.kind === 'dare' ? 'completed' : 'answered')} style={{ flex: 1, padding: 12, borderRadius: 14, backgroundColor: '#2BD4A0', alignItems: 'center' }}>
+                      <Text style={{ color: '#06201A', fontWeight: '800' }}>{round.kind === 'dare' ? 'Görevi Tamamladım' : 'Cevapladım'}</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity disabled={busy} onPress={() => resolve('passed')} style={{ flex: 1, padding: 12, borderRadius: 14, backgroundColor: '#3A2A50', alignItems: 'center' }}>
+                      <Text style={{ color: TEXT, fontWeight: '800' }}>Geç</Text>
+                    </TouchableOpacity>
+                  </View>
+                  <Text style={{ color: MUTED, fontSize: 11, textAlign: 'center' }}>Hiçbir soruyu cevaplamak ya da görevi yapmak zorunda değilsin. Geçmenin cezası yok.</Text>
+                </View>
+              ) : (
+                <View style={{ gap: 8 }}>
+                  <Text style={{ color: MUTED, fontSize: 12 }}>Cevap bekleniyor…</Text>
+                  {room.allow_user_questions && !isSpectator && !round.custom_text && (
+                    askOpen ? (
+                      <View>
+                        <TextInput value={askText} onChangeText={setAskText} maxLength={300} multiline placeholder={round.kind === 'truth' ? 'Sorunu yaz…' : 'Görevini yaz…'} placeholderTextColor={MUTED}
+                          style={{ color: TEXT, backgroundColor: 'rgba(0,0,0,0.3)', borderRadius: 12, padding: 10, minHeight: 60, textAlignVertical: 'top' }} />
+                        <TouchableOpacity disabled={busy} onPress={askCustom} style={{ marginTop: 8, padding: 10, borderRadius: 12, backgroundColor: PURPLE, alignItems: 'center' }}>
+                          <Text style={{ color: '#fff', fontWeight: '800' }}>Gönder</Text>
+                        </TouchableOpacity>
+                      </View>
+                    ) : (
+                      <TouchableOpacity onPress={() => setAskOpen(true)} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        <Ionicons name="create-outline" size={16} color={GOLD} />
+                        <Text style={{ color: GOLD, fontWeight: '700' }}>Kendi Sorumu Sor</Text>
+                      </TouchableOpacity>
+                    )
+                  )}
+                </View>
+              )}
+              {!isMyTurn && (
+                <TouchableOpacity onPress={() => router.push({ pathname: '/report', params: { reportedUserId: round.asked_by ?? turnUser, subjectType: 'user' } })} style={{ marginTop: 10, alignSelf: 'flex-end' }}>
+                  <Text style={{ color: MUTED, fontSize: 11 }}>Bildir</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          )}
+        </View>
+        {isSpectator && <Text style={{ color: MUTED, fontSize: 11, textAlign: 'center', marginTop: 10 }}>İzleyici modundasın: oyuna müdahale edemez, kanıtları göremezsin.</Text>}
+      </ScrollView>
 
-        {/* custom question */}
-        {room.allow_user_questions && !isSpectator && (
-          <CustomQuestion roomId={roomId} category={room.category} />
-        )}
-
-        <View style={{ flex: 1 }} />
-        {/* chat toggle */}
-        <TouchableOpacity onPress={() => { setChatOpen(!chatOpen); setUnread(0); }} style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: theme.colors.surface, borderRadius: theme.radii.md, borderWidth: 1, borderColor: theme.colors.border, padding: theme.spacing(3) }}>
-          <Ionicons name="chatbubble-ellipses-outline" size={20} color={theme.colors.textMuted} />
-          <Text style={{ color: theme.colors.textMuted, marginLeft: 8, flex: 1 }}>Oda sohbeti</Text>
-          {unread > 0 && <View style={{ backgroundColor: theme.colors.danger, borderRadius: 9, minWidth: 18, height: 18, alignItems: 'center', justifyContent: 'center' }}><Text style={{ color: '#fff', fontSize: 10, fontWeight: '800' }}>{unread}</Text></View>}
-        </TouchableOpacity>
-      </View>
-
-      {/* chat panel */}
-      {chatOpen && (
-        <View style={{ position: 'absolute', left: theme.spacing(3), right: theme.spacing(3), bottom: 90, maxHeight: 220, backgroundColor: theme.colors.surface, borderRadius: theme.radii.lg, borderWidth: 1, borderColor: theme.colors.border, padding: theme.spacing(3) }}>
+      {/* chat */}
+      {chatOpen ? (
+        <View style={{ position: 'absolute', left: 12, right: 12, bottom: 24, maxHeight: 240, backgroundColor: 'rgba(25,12,40,0.96)', borderRadius: 18, borderWidth: 1, borderColor: PURPLE + '66', padding: 10 }}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
-            <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 13 }}>Sohbet</Text>
-            <TouchableOpacity onPress={() => setChatOpen(false)}><Ionicons name="close" size={18} color={theme.colors.textMuted} /></TouchableOpacity>
+            <Text style={{ color: TEXT, fontWeight: '700', fontSize: 13 }}>Sohbet</Text>
+            <TouchableOpacity onPress={() => setChatOpen(false)}><Ionicons name="close" size={18} color={MUTED} /></TouchableOpacity>
           </View>
-          <FlatList data={chat.slice(-30)} keyExtractor={(m, i) => String(m.id ?? i)} style={{ maxHeight: 130 }}
+          <FlatList data={chat.slice(-30)} keyExtractor={(m, i) => String(m.id ?? i)} style={{ maxHeight: 140 }}
             renderItem={({ item }) => (
-              <Text style={{ color: theme.colors.textSecondary, fontSize: 12, marginBottom: 3 }} numberOfLines={2}>
-                <Text style={{ color: theme.colors.accent, fontWeight: '700' }}>{senderNames[item.user_id] ?? item.user_id?.slice(0, 6)}: </Text>{item.body}
+              <Text style={{ color: TEXT, fontSize: 12, marginBottom: 3 }} numberOfLines={3}>
+                <Text style={{ color: PINK, fontWeight: '700' }}>{names[item.user_id] ?? 'İzleyici'}: </Text>{item.body}
               </Text>
             )} />
           <View style={{ flexDirection: 'row', marginTop: 6 }}>
-            <TextInput value={chatText} onChangeText={setChatText} placeholder="Mesaj..." placeholderTextColor={theme.colors.textMuted}
-              style={{ flex: 1, color: theme.colors.text, fontSize: 13, backgroundColor: theme.colors.surfaceAlt, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 7 }}
+            <TextInput value={chatText} onChangeText={setChatText} placeholder="Mesaj…" placeholderTextColor={MUTED} maxLength={500}
+              style={{ flex: 1, color: TEXT, fontSize: 13, backgroundColor: 'rgba(0,0,0,0.35)', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 7 }}
               onSubmitEditing={sendChat} returnKeyType="send" />
-            <TouchableOpacity onPress={sendChat} style={{ marginLeft: 8, justifyContent: 'center' }}><Ionicons name="send" size={20} color={theme.colors.accent} /></TouchableOpacity>
+            <TouchableOpacity onPress={sendChat} style={{ marginLeft: 8, justifyContent: 'center' }}><Ionicons name="send" size={20} color={PINK} /></TouchableOpacity>
           </View>
         </View>
+      ) : (
+        <TouchableOpacity onPress={() => { setChatOpen(true); setUnread(0); }} style={{ position: 'absolute', right: 16, bottom: 28, width: 48, height: 48, borderRadius: 24, backgroundColor: 'rgba(25,12,40,0.96)', borderWidth: 1, borderColor: PURPLE + '88', alignItems: 'center', justifyContent: 'center' }}>
+          <Ionicons name="chatbubble-ellipses" size={22} color={PINK} />
+          {unread > 0 && <View style={{ position: 'absolute', top: -4, right: -4, backgroundColor: '#FF3B30', borderRadius: 9, minWidth: 18, height: 18, alignItems: 'center', justifyContent: 'center' }}><Text style={{ color: '#fff', fontSize: 10, fontWeight: '800' }}>{unread}</Text></View>}
+        </TouchableOpacity>
       )}
 
-      {/* one-view proof modal */}
-      <Modal visible={!!proofView} transparent animationType="fade" onRequestClose={() => setProofView(null)}>
-        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.92)', justifyContent: 'center', alignItems: 'center' }} onPress={() => setProofView(null)}>
-          {proofView?.kind === 'video' ? (
-            <Text style={{ color: '#fff' }}>Video kanıt — oynatıcı yakında</Text>
-          ) : (
-            <Image source={{ uri: proofView?.url }} style={{ width: '90%', height: '70%', borderRadius: 12 }} resizeMode="contain" />
-          )}
-          <Text style={{ color: '#B8A888', marginTop: 12, fontSize: 12 }}>Bu içerik yalnızca bir kez görüntülenebilir</Text>
+      {/* proof recipients */}
+      <Modal visible={!!proofPick} transparent animationType="slide" onRequestClose={() => setProofPick(null)}>
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' }} onPress={() => !uploading && setProofPick(null)}>
+          <Pressable onPress={() => {}} style={{ backgroundColor: '#1A0E2A', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20 }}>
+            <Text style={{ color: TEXT, fontWeight: '800', fontSize: 16 }}>Kanıtı kimler görsün?</Text>
+            <Text style={{ color: MUTED, fontSize: 12, marginTop: 4 }}>Seçtiğin her kişi yalnızca bir kez görüntüleyebilir. İzleyicilere gönderilmez.</Text>
+            <View style={{ marginTop: 12 }}>
+              {players.filter((m) => m.user_id !== uid).map((m) => {
+                const on = recipients.has(m.user_id);
+                return (
+                  <TouchableOpacity key={m.user_id} onPress={() => setRecipients((s) => { const n = new Set(s); if (n.has(m.user_id)) n.delete(m.user_id); else n.add(m.user_id); return n; })}
+                    style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 8 }}>
+                    <Ionicons name={on ? 'checkbox' : 'square-outline'} size={22} color={on ? PINK : MUTED} />
+                    <Avatar uri={m.profile?.avatar_url} name={m.profile?.display_name} size={32} />
+                    <Text style={{ color: TEXT, marginLeft: 8, flex: 1 }}>{names[m.user_id]}{m.user_id === round?.asked_by ? ' (soran)' : ''}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+            <TouchableOpacity disabled={uploading} onPress={sendProof} style={{ marginTop: 14, padding: 14, borderRadius: 16, backgroundColor: PINK, alignItems: 'center' }}>
+              <Text style={{ color: '#fff', fontWeight: '900' }}>{uploading ? 'Yükleniyor…' : `Gönder (${recipients.size} kişi)`}</Text>
+            </TouchableOpacity>
+          </Pressable>
         </Pressable>
       </Modal>
 
-      {/* invite modal */}
+      {/* view-once proof */}
+      <Modal visible={!!proofView} transparent animationType="fade" onRequestClose={() => setProofView(null)}>
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.94)', justifyContent: 'center', alignItems: 'center' }} onPress={() => setProofView(null)}>
+          <Pressable onPress={() => {}} style={{ width: '92%', height: '72%' }}>
+            {proofView?.kind === 'video' ? <ProofVideo url={proofView.url} /> : proofView ? <Image source={{ uri: proofView.url }} style={{ width: '100%', height: '100%', borderRadius: 14 }} resizeMode="contain" /> : null}
+          </Pressable>
+          <TouchableOpacity onPress={() => setProofView(null)} style={{ position: 'absolute', top: 56, right: 20, padding: 8 }}>
+            <Ionicons name="close" size={30} color="#fff" />
+          </TouchableOpacity>
+          <Text style={{ color: MUTED, marginTop: 12, fontSize: 12 }}>Tek görüntülemelik · kapattığında tekrar açılamaz</Text>
+        </Pressable>
+      </Modal>
+
+      {/* invite */}
       <Modal visible={showInvite} transparent animationType="fade" onRequestClose={() => setShowInvite(false)}>
         <Pressable style={{ flex: 1, backgroundColor: theme.colors.overlay, justifyContent: 'center', padding: theme.spacing(6) }} onPress={() => setShowInvite(false)}>
           <Pressable style={{ backgroundColor: theme.colors.surface, borderRadius: theme.radii.lg, padding: theme.spacing(4), maxHeight: '60%' }} onPress={() => {}}>
@@ -356,11 +549,11 @@ export default function TruthDareRoom() {
               {friends.map((f) => (
                 <TouchableOpacity key={f.id} onPress={() => void doInvite(f.id)} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: theme.spacing(3) }}>
                   <Avatar uri={f.avatar_url} name={f.display_name} size={38} />
-                  <Text style={{ color: theme.colors.text, marginLeft: theme.spacing(3), flex: 1 }}>{f.display_name}</Text>
+                  <Text style={{ color: theme.colors.text, marginLeft: theme.spacing(3), flex: 1 }}>{f.display_name ?? f.username}</Text>
                   <Ionicons name="paper-plane-outline" size={18} color={theme.colors.accent} />
                 </TouchableOpacity>
               ))}
-              {friends.length === 0 && <Text style={{ color: theme.colors.textMuted }}>Takip ettiğin kimse yok</Text>}
+              {friends.length === 0 && <Text style={{ color: theme.colors.textMuted }}>Takip ettiğin kimse yok. Paylaş butonuyla bağlantı gönderebilirsin.</Text>}
             </ScrollView>
           </Pressable>
         </Pressable>
@@ -371,41 +564,18 @@ export default function TruthDareRoom() {
   );
 }
 
-function CustomQuestion({ roomId, category }: { roomId: string; category: string }) {
-  const theme = useTheme();
-  const [open, setOpen] = useState(false);
-  const [kind, setKind] = useState<'truth' | 'dare'>('truth');
-  const [text, setText] = useState('');
-  const [sent, setSent] = useState(false);
-
-  async function submit() {
-    const { error } = await supabase.rpc('td_submit_content', { p_kind: kind, p_body: text, p_room: roomId });
-    if (error) Alert.alert('Hata', error.message);
-    else { setSent(true); setText(''); setTimeout(() => setSent(false), 2000); }
-  }
-
+function EvidenceButton({ viewed, onPress }: { viewed: boolean; onPress: () => void }) {
   return (
-    <View style={{ marginBottom: theme.spacing(3) }}>
-      <TouchableOpacity onPress={() => setOpen(!open)} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-        <Ionicons name="add-circle-outline" size={18} color={theme.colors.accent} />
-        <Text style={{ color: theme.colors.accent, fontSize: 13, fontWeight: '600' }}>Kendi sorun/görevinizi ekleyin</Text>
-      </TouchableOpacity>
-      {open && (
-        <View style={{ marginTop: theme.spacing(3), backgroundColor: theme.colors.surface, borderRadius: theme.radii.md, borderWidth: 1, borderColor: theme.colors.border, padding: theme.spacing(3) }}>
-          <View style={{ flexDirection: 'row', gap: 10, marginBottom: theme.spacing(3) }}>
-            {(['truth', 'dare'] as const).map((k) => (
-              <TouchableOpacity key={k} onPress={() => setKind(k)} style={{ flex: 1, padding: theme.spacing(2), borderRadius: 8, alignItems: 'center', backgroundColor: kind === k ? theme.colors.accentSoft : theme.colors.surfaceAlt }}>
-                <Text style={{ color: kind === k ? theme.colors.accent : theme.colors.textSecondary, fontWeight: '700', fontSize: 12 }}>{k === 'truth' ? 'Doğruluk' : 'Cesaret'}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-          <TextInput value={text} onChangeText={setText} placeholder="Sorunuzu yazın (5-300 karakter)" placeholderTextColor={theme.colors.textMuted}
-            multiline style={{ color: theme.colors.text, fontSize: 13, backgroundColor: theme.colors.surfaceAlt, borderRadius: 8, padding: 10, minHeight: 60, textAlignVertical: 'top' }} />
-          <TouchableOpacity onPress={submit} style={{ marginTop: theme.spacing(3), padding: theme.spacing(3), borderRadius: theme.radii.md, backgroundColor: theme.colors.accent, alignItems: 'center' }}>
-            <Text style={{ color: '#fff', fontWeight: '700', fontSize: 13 }}>{sent ? 'Eklendi!' : 'Gönder'}</Text>
-          </TouchableOpacity>
-        </View>
-      )}
-    </View>
+    <TouchableOpacity disabled={viewed} onPress={onPress}
+      style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, paddingVertical: 12, borderRadius: 16, marginBottom: 8,
+        backgroundColor: 'rgba(255,255,255,0.08)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.35)' }}>
+      <Ionicons name={viewed ? 'eye-off-outline' : 'flame-outline'} size={18} color={viewed ? MUTED : PINK} />
+      <Text style={{ color: viewed ? MUTED : TEXT, fontWeight: '700' }}>{viewed ? 'Görüntülendi' : 'Kanıtı görüntüle (tek sefer)'}</Text>
+    </TouchableOpacity>
   );
+}
+
+function ProofVideo({ url }: { url: string }) {
+  const player = useVideoPlayer(url, (p) => { p.loop = false; p.play(); });
+  return <VideoView player={player} style={{ width: '100%', height: '100%' }} contentFit="contain" nativeControls />;
 }

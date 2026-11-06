@@ -67,11 +67,15 @@ Deno.serve(async (req) => {
     const { data: profile } = await supabase.from('profiles').select('username, display_name').eq('id', user.id).single();
     displayName = profile?.display_name ?? profile?.username ?? displayName;
   } else if (context === 'truth_dare') {
+    // clients pass the room's livekit name; resolve it (RLS: members only)
+    const { data: tdRoom } = await supabase.from('td_rooms').select('id').eq('livekit_room', room).maybeSingle();
+    if (!tdRoom) return json({ error: 'forbidden' }, 403);
     const { data: member } = await supabase
       .from('td_room_members')
       .select('id, role, is_spectator')
-      .eq('room_id', room)
+      .eq('room_id', tdRoom.id)
       .eq('user_id', user.id)
+      .is('left_at', null)
       .maybeSingle();
     canPublish = !!member && !member.is_spectator;
     const { data: profile } = await supabase.from('profiles').select('username, display_name').eq('id', user.id).single();
