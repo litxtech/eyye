@@ -36,8 +36,11 @@ export function AppMap({ region, markers, style, onPress }: {
     return (
       <MBXMapView style={style} onPress={onPress} logoEnabled={false} attributionEnabled>
         <Camera
-          zoomLevel={region ? undefined : INITIAL.zoom}
+          zoomLevel={region
+            ? Math.min(18, Math.max(3, Math.round(Math.log2(360 / Math.max(region.latitudeDelta, 0.001)))))
+            : INITIAL.zoom}
           centerCoordinate={region ? [region.longitude, region.latitude] : [INITIAL.longitude, INITIAL.latitude]}
+          pitch={0}
         />
         <UserLocation visible />
         {markers?.map((m) => (

@@ -20,7 +20,8 @@
           "audio",
           "voip",
           "remote-notification"
-        ]
+        ],
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
@@ -63,7 +64,7 @@
       [
         "expo-notifications",
         {
-          "icon": "./assets/android-icon-foreground.png",
+          "icon": "./assets/android-icon-monochrome.png",
           "color": "#F5A623"
         }
       ],
@@ -95,7 +96,16 @@
       "expo-updates",
       "react-native-maps",
       "@rnmapbox/maps",
-      "./plugins/withMapbox"
+      "./plugins/withMapbox",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#0B0B0F",
+          "image": "./assets/splash-bg.png",
+          "imageWidth": 512,
+          "resizeMode": "cover"
+        }
+      ]
     ],
     "extra": {
       "router": {},

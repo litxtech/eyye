@@ -3,3 +3,4 @@ dist/
 .env
 .expo/
 firebase-adminsdk.json
+eas-ios-build.cmd
