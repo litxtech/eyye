@@ -19,6 +19,15 @@ function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 }
 
+// Optimistic-lock state write: only succeeds if version still matches.
+// Prevents double-draws / lost updates when syncs and player actions race.
+async function setState(svc: any, table_id: string, expectedVersion: number, state: any, extra: any = {}): Promise<boolean> {
+  const { data } = await svc.from('okey_tables')
+    .update({ state, version: expectedVersion + 1, ...extra })
+    .eq('id', table_id).eq('version', expectedVersion).select('id');
+  return (data?.length ?? 0) > 0;
+}
+
 // ---- meld validation -------------------------------------------------------
 // A group is valid if tiles (3-4) can form a set (same num, diff colors) or run
 // (same color, consecutive nums). Fake okeys are wildcards.
@@ -155,41 +164,56 @@ Deno.serve(async (req) => {
   const isMod = false; // moderation path via service only
 
   // ---------- state sync + bot driver ----------
-  async function driveBots(): Promise<any> {
-    // loop while it's a bot's turn (max 8 plies to avoid runaway)
+  async function driveBots(): Promise<{ table: any; conflict: boolean }> {
+    // loop while it's a bot's (or timed-out human's) turn — max 8 plies
+    let conflict = false;
     for (let i = 0; i < 8; i++) {
       const { data: t } = await svc.from('okey_tables').select('*').eq('id', table_id).single();
       if (!t || t.status !== 'playing') break;
       const st = t.state;
       const turnSeat = st.turn_seat;
       const turnPlayer = (players ?? []).find((p: any) => p.seat === turnSeat);
-      if (!turnPlayer?.is_bot) break;
+      if (!turnPlayer) break;
+      // human turn expired -> server auto-plays it like a bot
+      const elapsed = st.turn_started_at ? (Date.now() - new Date(st.turn_started_at).getTime()) / 1000 : 0;
+      const timedOut = !turnPlayer.is_bot && elapsed > (st.turn_seconds ?? 30) + 3;
+      if (!turnPlayer.is_bot && !timedOut) break;
+
+      // unfinished ply (drawn but not discarded)? finish it with a discard only.
+      const plySeat = st.ply_seat ?? null;
+      const plyActive = plySeat != null && st.ply_at && (Date.now() - new Date(st.ply_at).getTime()) < 60000;
+      if (plyActive && plySeat !== turnSeat) break;
+
       const { data: handRow } = await svc.from('okey_hands').select('tiles').eq('table_id', table_id).eq('seat', turnSeat).single();
-      let hand: Tile[] = handRow?.tiles ?? [];
-      const mv = botMove(hand, st);
-      if (mv.action === 'finish') {
-        await applyFinish(table_id, turnSeat, mv.payload.groups, svc);
-        break;
-      }
-      if (mv.action === 'take_discard') {
-        await applyTakeDiscard(table_id, turnSeat, svc);
+      const hand: Tile[] = handRow?.tiles ?? [];
+      let ok = true;
+      if (plyActive) {
+        // discard only — the draw already happened
+        const tile = botDiscard(hand);
+        ok = await applyDiscard(table_id, turnSeat, tile, svc);
       } else {
-        await applyDrawStock(table_id, turnSeat, svc);
+        const mv = botMove(hand, st);
+        if (mv.action === 'finish') {
+          ok = await applyFinish(table_id, turnSeat, mv.payload.groups, svc);
+        } else {
+          if (st.must_take_discard || mv.action === 'take_discard') ok = await applyTakeDiscard(table_id, turnSeat, svc);
+          else ok = await applyDrawStock(table_id, turnSeat, svc);
+          if (!ok) break;
+          const { data: h2 } = await svc.from('okey_hands').select('tiles').eq('table_id', table_id).eq('seat', turnSeat).single();
+          const tile = botDiscard(h2?.tiles ?? []);
+          ok = await applyDiscard(table_id, turnSeat, tile, svc);
+        }
       }
-      // after draw, discard
-      const { data: h2 } = await svc.from('okey_hands').select('tiles').eq('table_id', table_id).eq('seat', turnSeat).single();
-      hand = h2?.tiles ?? [];
-      const tile = botDiscard(hand);
-      await applyDiscard(table_id, turnSeat, tile, svc);
+      if (!ok) { conflict = true; break; }
       if (i > 6) break;
     }
     const { data: final } = await svc.from('okey_tables').select('*').eq('id', table_id).single();
-    return final;
+    return { table: final, conflict };
   }
 
   // ---------- actions ----------
   if (action === 'sync') {
-    const t = await driveBots();
+    const { table: t } = await driveBots();
     return json({ ok: true, state: t?.state, status: t?.status });
   }
 
@@ -203,11 +227,16 @@ Deno.serve(async (req) => {
   if (!handRow) return json({ error: 'no_hand' }, 404);
 
   const seat = myPlayer.seat;
-  const turnSeconds = st.turn_seconds ?? 30;
+  const expectedVersion = table.version ?? 0;
+  const conflict = () => json({ error: 'conflict' }, 409);
+  // ply lock: a draw starts a ply (ply_seat set); only that seat may discard to end it.
+  const plySeat = st.ply_seat ?? null;
+  const plyActive = plySeat != null && st.ply_at && (Date.now() - new Date(st.ply_at).getTime()) < 60000;
 
   switch (action) {
     case 'draw_stock': {
       if (st.must_take_discard) return json({ error: 'must_take_discard' }, 409);
+      if (plyActive) return json({ error: 'already_drew' }, 409);
       const stock: Tile[] = st.stock ?? [];
       if (stock.length === 0) {
         // reshuffle discards into stock (keep last discard)
@@ -217,56 +246,60 @@ Deno.serve(async (req) => {
         all.forEach(({ s, t }) => lastBySeat.set(s, t));
         const keep = new Set(lastBySeat.values());
         const rest = all.filter(({ t }) => !keep.has(t)).map(({ t }) => t);
-        // shuffle
         for (let i = rest.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [rest[i], rest[j]] = [rest[j], rest[i]]; }
-        const newState = { ...st, stock: rest, stock_count: rest.length, discards: Object.fromEntries(Object.entries(piles).map(([s, d]: any) => [s, []])) , phase: 'playing' };
-        await svc.from('okey_tables').update({ state: newState }).eq('id', table_id);
+        const newState = { ...st, stock: rest, stock_count: rest.length, discards: Object.fromEntries(Object.entries(piles).map(([s, d]: any) => [s, []])), phase: 'playing' };
+        if (!(await setState(svc, table_id, expectedVersion, newState))) return conflict();
         return json({ ok: true, reshuffled: true });
       }
       const drawn = stock[stock.length - 1];
       const newStock = stock.slice(0, -1);
+      const newState = {
+        ...st, stock: newStock, stock_count: newStock.length,
+        must_take_discard: false, turn_started_at: new Date().toISOString(),
+        ply_seat: seat, ply_at: new Date().toISOString(),
+      };
+      // serialize first, then mutate the hand — a failed guard leaves nothing changed
+      if (!(await setState(svc, table_id, expectedVersion, newState))) return conflict();
       const hand: Tile[] = [...handRow.tiles, drawn];
-      const newState = { ...st, stock: newStock, stock_count: newStock.length, must_take_discard: false, turn_started_at: new Date().toISOString() };
       await svc.from('okey_hands').update({ tiles: hand }).eq('table_id', table_id).eq('seat', seat);
-      await svc.from('okey_tables').update({ state: newState }).eq('id', table_id);
       await svc.from('okey_moves').insert({ table_id, seat, type: 'draw_stock', payload: {} });
       return json({ ok: true, drawn });
     }
     case 'take_discard': {
-      if (st.must_take_discard === false && handRow.tiles.length !== 14) {
-        // allowed only when hand has 14 (i.e., after opponent discard, before own draw) — standard: you may take top discard instead of drawing
-      }
+      if (plyActive) return json({ error: 'already_drew' }, 409);
       const prevSeat = (seat + 3) % 4;
       const pile: Tile[] = st.discards?.[String(prevSeat)] ?? [];
       if (pile.length === 0) return json({ error: 'empty_discard' }, 409);
       const taken = pile[pile.length - 1];
       const newPile = pile.slice(0, -1);
-      const hand: Tile[] = [...handRow.tiles, taken];
       const newDiscards = { ...st.discards, [String(prevSeat)]: newPile };
-      const newState = { ...st, discards: newDiscards, must_take_discard: false, turn_started_at: new Date().toISOString() };
+      const newState = {
+        ...st, discards: newDiscards, must_take_discard: false,
+        turn_started_at: new Date().toISOString(), ply_seat: seat, ply_at: new Date().toISOString(),
+      };
+      if (!(await setState(svc, table_id, expectedVersion, newState))) return conflict();
+      const hand: Tile[] = [...handRow.tiles, taken];
       await svc.from('okey_hands').update({ tiles: hand }).eq('table_id', table_id).eq('seat', seat);
-      await svc.from('okey_tables').update({ state: newState }).eq('id', table_id);
       await svc.from('okey_moves').insert({ table_id, seat, type: 'take_discard', payload: { tile: taken } });
       return json({ ok: true, taken });
     }
     case 'discard': {
+      if (plySeat !== seat) return json({ error: 'must_draw_first' }, 409);
       const tile = payload?.tile as Tile;
       const hand: Tile[] = [...handRow.tiles];
       const idx = hand.indexOf(tile);
       if (idx < 0) return json({ error: 'tile_not_in_hand' }, 400);
-      if (!st.must_take_discard && hand.length !== 15 && hand.length !== 14) {
-        // must have drawn first this turn: enforce via phase flag
-      }
       hand.splice(idx, 1);
       const newDiscards = { ...(st.discards ?? {}), [String(seat)]: [...((st.discards ?? {})[String(seat)] ?? []), tile] };
       const nextSeat = (seat + 1) % 4;
       const newState = {
         ...st, discards: newDiscards, turn_seat: nextSeat,
         turn_started_at: new Date().toISOString(), must_take_discard: true,
+        ply_seat: null, ply_at: null,
         last_move: { seat, tile, type: 'discard', at: new Date().toISOString() },
       };
+      if (!(await setState(svc, table_id, expectedVersion, newState))) return conflict();
       await svc.from('okey_hands').update({ tiles: hand }).eq('table_id', table_id).eq('seat', seat);
-      await svc.from('okey_tables').update({ state: newState }).eq('id', table_id);
       await svc.from('okey_moves').insert({ table_id, seat, type: 'discard', payload: { tile } });
       return json({ ok: true, next_seat: nextSeat });
     }
@@ -282,6 +315,8 @@ Deno.serve(async (req) => {
           hand.splice(i, 1);
         }
       }
+      // version bump serializes concurrent melds/draws on this table
+      if (!(await setState(svc, table_id, expectedVersion, st))) return conflict();
       const newMelds = [...(handRow.melds ?? []), ...groups];
       await svc.from('okey_hands').update({ tiles: hand, melds: newMelds }).eq('table_id', table_id).eq('seat', seat);
       await svc.from('okey_moves').insert({ table_id, seat, type: 'meld', payload: { groups } });
@@ -301,7 +336,7 @@ Deno.serve(async (req) => {
       for (const g of groups) if (!groupValid(g, st.okey_tile)) return json({ error: 'invalid_meld', group: g }, 400);
       // require at least one group uses real okey or a fake okey for "okey ile bitirme" bonus
       const usesOkey = groups.some((g) => g.includes(st.okey_tile) || g.some((t) => isOkey(t)));
-      await applyFinish(table_id, seat, groups, svc, usesOkey);
+      if (!(await applyFinish(table_id, seat, groups, svc, usesOkey))) return conflict();
       return json({ ok: true, finished: true });
     }
     default:
@@ -309,45 +344,59 @@ Deno.serve(async (req) => {
   }
 });
 
-async function applyDrawStock(table_id: string, seat: number, svc: any) {
+async function applyDrawStock(table_id: string, seat: number, svc: any): Promise<boolean> {
   const { data: t } = await svc.from('okey_tables').select('*').eq('id', table_id).single();
+  if (!t || t.status !== 'playing') return false;
   const st = t.state; const stock: Tile[] = st.stock ?? [];
-  if (!stock.length) return;
+  if (!stock.length) return false;
   const drawn = stock[stock.length - 1];
+  const newState = {
+    ...st, stock: stock.slice(0, -1), stock_count: stock.length - 1,
+    turn_started_at: new Date().toISOString(), ply_seat: seat, ply_at: new Date().toISOString(),
+  };
+  if (!(await setState(svc, table_id, t.version ?? 0, newState))) return false;
   const { data: h } = await svc.from('okey_hands').select('tiles').eq('table_id', table_id).eq('seat', seat).single();
   await svc.from('okey_hands').update({ tiles: [...(h?.tiles ?? []), drawn] }).eq('table_id', table_id).eq('seat', seat);
-  await svc.from('okey_tables').update({ state: { ...st, stock: stock.slice(0, -1), stock_count: stock.length - 1, turn_started_at: new Date().toISOString() } }).eq('id', table_id);
+  return true;
 }
 
-async function applyTakeDiscard(table_id: string, seat: number, svc: any) {
+async function applyTakeDiscard(table_id: string, seat: number, svc: any): Promise<boolean> {
   const { data: t } = await svc.from('okey_tables').select('*').eq('id', table_id).single();
+  if (!t || t.status !== 'playing') return false;
   const st = t.state; const prev = (seat + 3) % 4;
   const pile: Tile[] = st.discards?.[String(prev)] ?? [];
-  if (!pile.length) return;
+  if (!pile.length) return false;
   const taken = pile[pile.length - 1];
+  const nd = { ...st.discards, [String(prev)]: pile.slice(0, -1) };
+  const newState = { ...st, discards: nd, turn_started_at: new Date().toISOString(), ply_seat: seat, ply_at: new Date().toISOString() };
+  if (!(await setState(svc, table_id, t.version ?? 0, newState))) return false;
   const { data: h } = await svc.from('okey_hands').select('tiles').eq('table_id', table_id).eq('seat', seat).single();
   await svc.from('okey_hands').update({ tiles: [...(h?.tiles ?? []), taken] }).eq('table_id', table_id).eq('seat', seat);
-  const nd = { ...st.discards, [String(prev)]: pile.slice(0, -1) };
-  await svc.from('okey_tables').update({ state: { ...st, discards: nd, turn_started_at: new Date().toISOString() } }).eq('id', table_id);
+  return true;
 }
 
-async function applyDiscard(table_id: string, seat: number, tile: Tile, svc: any) {
+async function applyDiscard(table_id: string, seat: number, tile: Tile, svc: any): Promise<boolean> {
   const { data: t } = await svc.from('okey_tables').select('*').eq('id', table_id).single();
+  if (!t || t.status !== 'playing') return false;
   const st = t.state;
   const { data: h } = await svc.from('okey_hands').select('tiles').eq('table_id', table_id).eq('seat', seat).single();
   const hand: Tile[] = (h?.tiles ?? []).filter((x: Tile) => x !== tile);
-  await svc.from('okey_hands').update({ tiles: hand }).eq('table_id', table_id).eq('seat', seat);
   const nd = { ...(st.discards ?? {}), [String(seat)]: [...((st.discards ?? {})[String(seat)] ?? []), tile] };
-  await svc.from('okey_tables').update({ state: {
+  const ok = await setState(svc, table_id, t.version ?? 0, {
     ...st, discards: nd, turn_seat: (seat + 1) % 4,
     turn_started_at: new Date().toISOString(), must_take_discard: true,
+    ply_seat: null, ply_at: null,
     last_move: { seat, tile, type: 'discard' },
-  } }).eq('id', table_id);
+  });
+  if (!ok) return false;
+  await svc.from('okey_hands').update({ tiles: hand }).eq('table_id', table_id).eq('seat', seat);
   await svc.from('okey_moves').insert({ table_id, seat, type: 'discard', payload: { tile } });
+  return true;
 }
 
-async function applyFinish(table_id: string, seat: number, groups: Tile[][], svc: any, usesOkey = false) {
+async function applyFinish(table_id: string, seat: number, groups: Tile[][], svc: any, usesOkey = false): Promise<boolean> {
   const { data: t } = await svc.from('okey_tables').select('*').eq('id', table_id).single();
+  if (!t || t.status !== 'playing') return false;
   const { data: pls } = await svc.from('okey_players').select('*').eq('table_id', table_id).is('left_at', null);
   const { data: hands } = await svc.from('okey_hands').select('*').eq('table_id', table_id);
   const mode = t.mode;
@@ -374,8 +423,11 @@ async function applyFinish(table_id: string, seat: number, groups: Tile[][], svc
     : [seat];
   const share = Math.floor((total + bonus) / winners.length);
 
-  const newState = { ...t.state, phase: 'finished', winner_seat: seat, finished_groups: groups };
-  await svc.from('okey_tables').update({ status: 'finished', finished_at: new Date().toISOString(), winner_seat: seat, state: newState }).eq('id', table_id);
+  const newState = { ...t.state, phase: 'finished', winner_seat: seat, finished_groups: groups, ply_seat: null, ply_at: null };
+  const { data: fin } = await svc.from('okey_tables')
+    .update({ status: 'finished', finished_at: new Date().toISOString(), winner_seat: seat, state: newState, version: (t.version ?? 0) + 1 })
+    .eq('id', table_id).eq('version', t.version ?? 0).select('id');
+  if (!fin?.length) return false;
 
   for (const p of pls ?? []) {
     const s = p.seat as number;
@@ -388,4 +440,5 @@ async function applyFinish(table_id: string, seat: number, groups: Tile[][], svc
     }
   }
   await svc.from('okey_moves').insert({ table_id, seat, type: 'finish', payload: { groups, scores, winners, bonus } });
+  return true;
 }

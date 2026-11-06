@@ -33,26 +33,50 @@ export default function TruthDareRoom() {
   const [uploading, setUploading] = useState(false);
   const voiceRef = useRef<any>(null);
 
+  const chatOpenRef = useRef(chatOpen);
+  chatOpenRef.current = chatOpen;
+  const uidRef = useRef(uid);
+  uidRef.current = uid;
+  const loadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const loadingRef = useRef(false);
+  const reloadQueued = useRef(false);
+
   const load = useCallback(async () => {
-    const { data, error } = await supabase.rpc('td_state', { p_room: roomId });
-    if (error) { Alert.alert('Error', error.message); return; }
-    setData(data);
+    if (loadingRef.current) { reloadQueued.current = true; return; }
+    loadingRef.current = true;
+    try {
+      const { data, error } = await supabase.rpc('td_state', { p_room: roomId });
+      if (error) { Alert.alert('Error', error.message); return; }
+      setData(data);
+    } finally {
+      loadingRef.current = false;
+      if (reloadQueued.current) { reloadQueued.current = false; void load(); }
+    }
   }, [roomId]);
 
+  const scheduleLoad = useCallback(() => {
+    if (loadTimer.current) clearTimeout(loadTimer.current);
+    loadTimer.current = setTimeout(() => { void load(); }, 300);
+  }, [load]);
+
+  const gameId = data?.game?.id ?? '00000000-0000-0000-0000-000000000000';
   useEffect(() => {
     void load();
     const ch = supabase.channel(`td-${roomId}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'td_rooms', filter: `id=eq.${roomId}` }, () => void load())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'td_room_members', filter: `room_id=eq.${roomId}` }, () => void load())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'td_games', filter: `room_id=eq.${roomId}` }, () => void load())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'td_rounds', filter: `game_id=eq.${data?.game?.id ?? '00000000-0000-0000-0000-000000000000'}` }, () => void load())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'td_rooms', filter: `id=eq.${roomId}` }, scheduleLoad)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'td_room_members', filter: `room_id=eq.${roomId}` }, scheduleLoad)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'td_games', filter: `room_id=eq.${roomId}` }, scheduleLoad)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'td_rounds', filter: `game_id=eq.${gameId}` }, scheduleLoad)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'td_chat', filter: `room_id=eq.${roomId}` }, (p: any) => {
         setChat((c) => [...c.slice(-50), p.new]);
-        if (!chatOpen && p.new.user_id !== uid) setUnread((u) => u + 1);
+        if (!chatOpenRef.current && p.new.user_id !== uidRef.current) setUnread((u) => u + 1);
       })
       .subscribe();
-    return () => { void supabase.removeChannel(ch); };
-  }, [roomId, load, chatOpen, uid, data?.game?.id]);
+    return () => {
+      void supabase.removeChannel(ch);
+      if (loadTimer.current) clearTimeout(loadTimer.current);
+    };
+  }, [roomId, load, scheduleLoad, gameId]);
 
   // voice when room allows it
   useEffect(() => {

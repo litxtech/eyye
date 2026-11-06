@@ -121,15 +121,26 @@ export default function ChatsScreen() {
 
   useEffect(() => { void load(); }, [load]);
 
+  // Realtime subs are intentionally unfiltered (list spans many conversations);
+  // debounce so a busy app doesn't trigger a full reload per message.
+  const listTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduleLoad = React.useCallback(() => {
+    if (listTimer.current) clearTimeout(listTimer.current);
+    listTimer.current = setTimeout(() => { void load(); }, 1500);
+  }, [load]);
+
   useEffect(() => {
     if (!uid) return;
     const ch = supabase
       .channel('chats-list')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, () => void load())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'conversation_members' }, () => void load())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, scheduleLoad)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'conversation_members' }, scheduleLoad)
       .subscribe();
-    return () => { void supabase.removeChannel(ch); };
-  }, [uid, load]);
+    return () => {
+      void supabase.removeChannel(ch);
+      if (listTimer.current) clearTimeout(listTimer.current);
+    };
+  }, [uid, scheduleLoad]);
 
   const visible = items.filter((i) => i.archived === showArchived);
 

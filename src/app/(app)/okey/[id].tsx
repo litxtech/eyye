@@ -42,47 +42,83 @@ export default function OkeyTable() {
   const [friends, setFriends] = useState<any[]>([]);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const voiceRef = useRef<any>(null);
+  const loadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const loadingRef = useRef(false);
+  const reloadQueued = useRef(false);
+  const chatOpenRef = useRef(chatOpen);
+  chatOpenRef.current = chatOpen;
+  const uidRef = useRef(uid);
+  uidRef.current = uid;
+  const dataRef = useRef<any>(null);
+  dataRef.current = data;
+  const profilesKey = useRef('');
 
   const load = useCallback(async () => {
-    const { data, error } = await supabase.rpc('okey_state', { p_table: tableId });
-    if (error) { Alert.alert('Error', error.message); return; }
-    setData(data);
-    if (data?.my_hand) setHand(data.my_hand);
-    if (data?.my_melds) setMelds(data.my_melds);
-    // players payload has no profile join — fetch separately
-    const ids = (data?.players ?? []).map((p: any) => p.user_id).filter(Boolean);
-    if (ids.length) {
-      const { data: profs } = await supabase.from('profiles').select('id, display_name, username, avatar_url').in('id', ids);
-      const map: Record<string, any> = {};
-      for (const p of profs ?? []) map[p.id] = p;
-      setProfiles(map);
+    if (loadingRef.current) { reloadQueued.current = true; return; }
+    loadingRef.current = true;
+    try {
+      const { data, error } = await supabase.rpc('okey_state', { p_table: tableId });
+      if (error) { Alert.alert('Error', error.message); return; }
+      setData(data);
+      if (data?.my_hand) setHand(data.my_hand);
+      if (data?.my_melds) setMelds(data.my_melds);
+      // players payload has no profile join — fetch separately, only when roster changes
+      const ids = (data?.players ?? []).map((p: any) => p.user_id).filter(Boolean).sort();
+      const key = ids.join(',');
+      if (key !== profilesKey.current) {
+        profilesKey.current = key;
+        if (ids.length) {
+          const { data: profs } = await supabase.from('profiles').select('id, display_name, username, avatar_url').in('id', ids);
+          const map: Record<string, any> = {};
+          for (const p of profs ?? []) map[p.id] = p;
+          setProfiles(map);
+        } else setProfiles({});
+      }
+    } finally {
+      loadingRef.current = false;
+      if (reloadQueued.current) { reloadQueued.current = false; void load(); }
     }
   }, [tableId]);
+
+  // trailing-debounce state reloads — one RPC per burst of realtime events
+  const scheduleLoad = useCallback(() => {
+    if (loadTimer.current) clearTimeout(loadTimer.current);
+    loadTimer.current = setTimeout(() => { void load(); }, 300);
+  }, [load]);
 
   useEffect(() => {
     void load();
     const ch = supabase.channel(`okey-${tableId}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'okey_tables', filter: `id=eq.${tableId}` }, () => void load())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'okey_players', filter: `table_id=eq.${tableId}` }, () => void load())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'okey_tables', filter: `id=eq.${tableId}` }, scheduleLoad)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'okey_players', filter: `table_id=eq.${tableId}` }, scheduleLoad)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'okey_chat', filter: `table_id=eq.${tableId}` }, (p: any) => {
         setChat((c) => [...c.slice(-50), p.new]);
-        if (!chatOpen && p.new.user_id !== uid) setUnread((u) => u + 1);
+        if (!chatOpenRef.current && p.new.user_id !== uidRef.current) setUnread((u) => u + 1);
       })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'okey_moves', filter: `table_id=eq.${tableId}` }, () => {
-        void supabase.functions.invoke('okey-action', { body: { table_id: tableId, action: 'sync' } }).then(() => load());
-      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'okey_moves', filter: `table_id=eq.${tableId}` }, scheduleLoad)
       .subscribe();
-    return () => { void supabase.removeChannel(ch); };
-  }, [tableId, load, chatOpen, uid]);
+    return () => {
+      void supabase.removeChannel(ch);
+      if (loadTimer.current) clearTimeout(loadTimer.current);
+    };
+  }, [tableId, load, scheduleLoad]);
 
-  // periodic sync to drive bots + turn timer
+  // Bot/timeout driver: elected seat syncs every 3s; others every ~21s as backup.
+  // Server-side version locks make duplicate syncs harmless no-ops.
   useEffect(() => {
-    const iv = setInterval(async () => {
-      await supabase.functions.invoke('okey-action', { body: { table_id: tableId, action: 'sync' } });
-      void load();
-    }, 8000);
+    let tick = 0;
+    const iv = setInterval(() => {
+      tick++;
+      const d = dataRef.current;
+      if (d?.table?.status !== 'playing') return;
+      const seats = (d.players ?? []).filter((p: any) => p.user_id && !p.is_bot).map((p: any) => p.seat as number);
+      const driver = seats.length ? Math.min(...seats) : -1;
+      const isDriver = d.my_seat != null && d.my_seat === driver;
+      if (!isDriver && tick % 7 !== 0) return;
+      void supabase.functions.invoke('okey-action', { body: { table_id: tableId, action: 'sync' } });
+    }, 3000);
     return () => clearInterval(iv);
-  }, [tableId, load]);
+  }, [tableId]);
 
   // turn timer display
   useEffect(() => {
@@ -111,11 +147,17 @@ export default function OkeyTable() {
     const { data: res, error } = await supabase.functions.invoke('okey-action', { body: { table_id: tableId, action, payload } });
     if (error) {
       const msg = (error as any)?.message ?? '';
-      Alert.alert(t('common.error'), msg.includes('not_your_turn') ? 'Sıra sende değil' : msg || t('common.error'));
+      const friendly = msg.includes('not_your_turn') ? 'Sıra sende değil'
+        : msg.includes('must_draw_first') ? 'Önce taş çekmelisin'
+        : msg.includes('already_drew') ? 'Zaten taş çektin'
+        : msg || t('common.error');
+      Alert.alert(t('common.error'), friendly);
       return;
     }
     if (res?.error) Alert.alert(t('common.error'), res.error);
-    void load();
+    // nudge the bot/timeout driver immediately instead of waiting for the next tick
+    void supabase.functions.invoke('okey-action', { body: { table_id: tableId, action: 'sync' } });
+    scheduleLoad();
   }
 
   function toggleTile(id: number) {
@@ -125,11 +167,11 @@ export default function OkeyTable() {
     setSelected(next);
   }
 
-  const sortedHand = [...hand].sort((a, b) => {
+  const sortedHand = React.useMemo(() => [...hand].sort((a, b) => {
     const ia = tileInfo(a), ib = tileInfo(b);
     if (sortMode === 'color') return ia.color - ib.color || ia.num - ib.num;
     return ia.num - ib.num || ia.color - ib.color;
-  });
+  }), [hand, sortMode]);
 
   const isMyTurn = data?.my_seat != null && data?.state?.turn_seat === data.my_seat && data?.table?.status === 'playing';
   const stockCount = data?.state?.stock_count ?? 0;
@@ -300,7 +342,7 @@ export default function OkeyTable() {
             ))}
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 20, alignItems: 'flex-end', minHeight: 64 }}>
               {sortedHand.map((tile) => (
-                <OkeyTile key={`${tile}-${hand.indexOf(tile)}`} id={tile} size={44} selected={selected.has(tile)} onPress={() => isMyTurn && toggleTile(tile)} />
+                <OkeyTile key={tile} id={tile} size={44} selected={selected.has(tile)} onPress={() => isMyTurn && toggleTile(tile)} />
               ))}
             </ScrollView>
             {/* action buttons */}

@@ -46,7 +46,9 @@ export default function ChatScreen() {
   const typingRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const seenIds = useRef<Set<string>>(new Set());
 
-  const load = useCallback(async () => {
+  const loadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const load = useCallback(async (opts?: { markRead?: boolean }) => {
     if (!convId) return;
     const { data } = await supabase
       .from('messages')
@@ -72,8 +74,8 @@ export default function ChatScreen() {
     }
     setMessages(msgs);
     setLoading(false);
-    // Mark read
-    if (uid) {
+    // Mark read (skipped for lightweight realtime refreshes like reactions)
+    if (uid && opts?.markRead !== false) {
       const unread = msgs.filter((m) => m.sender_id !== uid);
       for (const m of unread) {
         await supabase.from('message_receipts').upsert(
@@ -87,7 +89,13 @@ export default function ChatScreen() {
     }
   }, [convId, uid]);
 
-  useEffect(() => { void load(); }, [load]);
+  // trailing-debounce reloads triggered by realtime events
+  const scheduleLoad = useCallback((opts?: { markRead?: boolean }) => {
+    if (loadTimer.current) clearTimeout(loadTimer.current);
+    loadTimer.current = setTimeout(() => { void load(opts); }, 300);
+  }, [load]);
+
+  useEffect(() => { void load(); return () => { if (loadTimer.current) clearTimeout(loadTimer.current); }; }, [load]);
 
   // Realtime + broadcast (typing/presence)
   useEffect(() => {
@@ -105,7 +113,12 @@ export default function ChatScreen() {
         const m = payload.new as Msg;
         setMessages((prev) => prev.map((x) => (x.id === m.id ? { ...x, ...m } : x)));
       })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'message_reactions' }, () => void load())
+      // reactions table has no conversation filter — only reload when the
+      // reaction targets a message currently on screen, and skip receipt writes
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'message_reactions' }, (p: any) => {
+        const mid = p.new?.message_id ?? p.old?.message_id;
+        if (mid && seenIds.current.has(mid)) scheduleLoad({ markRead: false });
+      })
       .on('broadcast', { event: 'typing' }, (p: any) => {
         if (p.payload?.user_id !== uid) {
           setPeerTyping(true);
@@ -114,7 +127,7 @@ export default function ChatScreen() {
       })
       .subscribe();
     return () => { void supabase.removeChannel(ch); };
-  }, [uid, convId, load]);
+  }, [uid, convId, load, scheduleLoad]);
 
   // Peer presence (direct chats)
   useEffect(() => {
