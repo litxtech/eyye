@@ -25,7 +25,7 @@ export async function registerForPushNotifications(userId: string) {
     if (Platform.OS === 'android') {
       await Notifications.setNotificationChannelAsync('default', {
         name: 'Default',
-        importance: Notifications.AndroidImportance.MAX,
+        importance: 5 as any,
       });
     }
     const token = (await Notifications.getExpoPushTokenAsync()).data;

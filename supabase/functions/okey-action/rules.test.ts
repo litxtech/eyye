@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   natural, okeyFromIndicator, isJoker, evaluateWin, findFinishingTile, step, autoPly, needsAutoPly, roundPoints,
+  createDeck, validateTilesRange, validateDeckMultiplicity, validateGameConsistency,
   type Game, type Tile,
 } from './rules.ts';
 
@@ -12,6 +13,15 @@ const okey = { color: 2, num: 5 }; // blue 5 is okey (indicator blue 4)
 test('tile encoding', () => {
   assert.deepEqual(natural(T(3, 13, 1)), { color: 3, num: 13 });
   assert.deepEqual(natural(T(0, 1)), { color: 0, num: 1 });
+});
+
+test('deck generation creates 106 tiles in valid range', () => {
+  const d = createDeck();
+  assert.equal(d.length, 106);
+  assert.equal(d[0], 0);
+  assert.equal(d[105], 105);
+  assert.ok(validateTilesRange(d));
+  assert.ok(validateDeckMultiplicity(d));
 });
 
 test('okey is indicator + 1, 13 wraps to 1', () => {
@@ -190,4 +200,10 @@ test('bot finishes when it can', () => {
   g.players[0].is_bot = true;
   const r = autoPly(g, 'now');
   assert.ok(r.ok && r.finished && r.game.state.result?.winner_seat === 0);
+});
+
+test('game consistency rejects out-of-range tile ids', () => {
+  const g = mkGame();
+  g.stock.push(999);
+  assert.equal(validateGameConsistency(g), false);
 });

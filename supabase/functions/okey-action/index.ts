@@ -2,7 +2,7 @@
 // this handler loads private state with the service role, applies one action
 // and commits atomically through okey_commit() (optimistic version lock).
 import { createClient } from 'npm:@supabase/supabase-js@2';
-import { step, autoPly, needsAutoPly, type Game, type StepOk } from './rules.ts';
+import { step, autoPly, needsAutoPly, validateGameConsistency, type Game, type StepOk } from './rules.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -18,6 +18,14 @@ function json(body: unknown, status = 200) {
 }
 
 type Loaded = { table: any; game: Game };
+const ACTIONS = new Set(['sync', 'draw_stock', 'take_discard', 'discard', 'finish']);
+
+function isValidPayload(action: string, payload: any): boolean {
+  if (action === 'discard' || action === 'finish') {
+    return Number.isInteger(payload?.tile) && payload.tile >= 0 && payload.tile <= 105;
+  }
+  return payload == null || typeof payload === 'object';
+}
 
 async function load(tableId: string): Promise<Loaded | null> {
   const [{ data: table }, { data: players }, { data: hands }, { data: secret }] = await Promise.all([
@@ -85,7 +93,9 @@ Deno.serve(async (req) => {
   if (!user) return json({ error: 'unauthorized' }, 401);
 
   const { table_id, action, payload } = await req.json().catch(() => ({}));
-  if (!table_id || !action) return json({ error: 'bad_request' }, 400);
+  if (!table_id || !action || typeof table_id !== 'string' || typeof action !== 'string') return json({ error: 'bad_request' }, 400);
+  if (!ACTIONS.has(action)) return json({ error: 'bad_action' }, 400);
+  if (!isValidPayload(action, payload)) return json({ error: 'bad_payload' }, 400);
 
   if (action === 'sync') {
     const { data: member } = await svc.rpc('okey_is_member', { p_table: table_id, p_user: user.id });
@@ -98,6 +108,7 @@ Deno.serve(async (req) => {
   for (let attempt = 0; attempt < 2; attempt++) {
     const l = await load(table_id);
     if (!l) return json({ ok: false, error: 'not_found' });
+    if (!validateGameConsistency(l.game)) return json({ ok: false, error: 'corrupted_state' });
     const me = l.game.players.find((p) => p.user_id === user.id && !p.is_bot);
     if (!me) return json({ ok: false, error: 'not_a_player' }, 403);
     if (l.table.status !== 'playing') return json({ ok: false, error: 'not_playing' });

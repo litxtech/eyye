@@ -50,6 +50,32 @@ export const FAKE_B = 105;
 export const isFake = (t: Tile) => t >= 104;
 export const natural = (t: Tile) => ({ color: Math.floor(t / 26), num: (t % 13) + 1 });
 
+export function createDeck(): Tile[] {
+  return Array.from({ length: 106 }, (_, i) => i);
+}
+
+export function validateTilesRange(tiles: Tile[]): boolean {
+  return tiles.every((t) => Number.isInteger(t) && t >= 0 && t <= 105);
+}
+
+export function validateDeckMultiplicity(tiles: Tile[]): boolean {
+  const counts = new Map<number, number>();
+  for (const t of tiles) counts.set(t, (counts.get(t) ?? 0) + 1);
+  for (let i = 0; i <= 103; i++) if ((counts.get(i) ?? 0) > 2) return false;
+  if ((counts.get(104) ?? 0) > 1) return false;
+  if ((counts.get(105) ?? 0) > 1) return false;
+  return true;
+}
+
+export function validateGameConsistency(game: Game): boolean {
+  if (!validateTilesRange(game.stock)) return false;
+  if (!validateDeckMultiplicity(game.stock)) return false;
+  for (const hand of Object.values(game.hands)) {
+    if (!validateTilesRange(hand)) return false;
+  }
+  return true;
+}
+
 export function okeyFromIndicator(indicator: Tile): Okey {
   const { color, num } = natural(indicator);
   return { color, num: num === 13 ? 1 : num + 1 };
@@ -290,6 +316,7 @@ function drawResult(g: Game): RoundResult {
 }
 
 export function step(game: Game, seat: number, action: string, payload: { tile?: Tile } | undefined, now: string): StepOk | StepErr {
+  if (!validateGameConsistency(game)) return { ok: false, error: 'corrupted_state' };
   const g = clone(game);
   const st = g.state;
   if (st.result) return { ok: false, error: 'round_over' };
